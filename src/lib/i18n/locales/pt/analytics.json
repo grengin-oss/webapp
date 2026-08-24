@@ -169,7 +169,7 @@
       },
       "usageGrowth": {
         "title": "Crescimento de uso",
-        "subtitle": "Solicitações (barras) • Tokens (linha)",
+        "subtitle": "Uso de tokens ao longo do tempo",
         "requests": "Solicitações",
         "tokens": "Tokens"
       },

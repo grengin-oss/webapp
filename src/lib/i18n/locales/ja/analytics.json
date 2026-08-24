@@ -169,7 +169,7 @@
       },
       "usageGrowth": {
         "title": "使用量の増加",
-        "subtitle": "リクエスト（棒グラフ） • トークン（折れ線）",
+        "subtitle": "時間経過に伴うトークン使用量",
         "requests": "リクエスト",
         "tokens": "トークン"
       },

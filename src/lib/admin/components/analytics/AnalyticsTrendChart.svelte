@@ -9,6 +9,10 @@ SPDX-License-Identifier: Apache-2.0
    * grid lines, a 208px stretched viewBox with 2.2px lines and 4px dots, and
    * an x-axis row that ends in the axis label. Series carrying a different
    * unit (tokens next to requests) opt into a second, right-hand axis.
+   *
+   * Each series picks its own mark, so one card can mix them the way the
+   * design's four modes do: a line for Multi-Metric, bars behind a line for
+   * Usage Growth, grouped bars for API Reliability, a filled area for Cost.
    */
   interface Series {
     key: string;
@@ -16,6 +20,13 @@ SPDX-License-Identifier: Apache-2.0
     color: string;
     values: number[];
     axis?: "left" | "right";
+    /** Mark used for this series. Defaults to `line`. */
+    kind?: "line" | "area" | "bar";
+    /**
+     * Draw the stroke as a curve rather than straight segments. Defaults to
+     * true for lines and areas, matching the design's `pointsToSmoothPath`.
+     */
+    smooth?: boolean;
     /** Included in the tooltip but not plotted (the design's multi-metric card). */
     tooltipOnly?: boolean;
     /** Tooltip / axis formatter. */
@@ -44,14 +55,23 @@ SPDX-License-Identifier: Apache-2.0
 
   const VIEW_W = 1000;
   const Y_STEPS = 3;
+  /** Bars never grow past this on screen, however wide the card gets. */
+  const MAX_BAR_PX = 16;
+  /** Gap between the bars of one group (Success next to Errors). */
+  const BAR_GAP_PX = 3;
 
   let plotEl = $state<HTMLDivElement | null>(null);
+  let plotWidth = $state(0);
   let hoverIndex = $state<number | null>(null);
 
   const pointCount = $derived(Math.max(...series.map((s) => s.values.length), 0));
   const plotted = $derived(series.filter((s) => !s.tooltipOnly));
   const leftSeries = $derived(plotted.filter((s) => (s.axis ?? "left") === "left"));
   const rightSeries = $derived(plotted.filter((s) => s.axis === "right"));
+
+  /** Bars share one band per point, so they need to know the whole group. */
+  const barSeries = $derived(plotted.filter((s) => s.kind === "bar"));
+  const curveSeries = $derived(plotted.filter((s) => s.kind !== "bar"));
 
   /**
    * Axis top that divides into Y_STEPS round ticks, so the column reads
@@ -97,9 +117,102 @@ SPDX-License-Identifier: Apache-2.0
     return height - 4 - (Math.min(value, max) / max) * usable;
   }
 
-  function pointsFor(item: Series): string {
+  /** Baseline the bars stand on and the areas close against. */
+  const baseline = $derived(height - 4);
+
+  type Point = [number, number];
+
+  function coordsFor(item: Series): Point[] {
     const max = item.axis === "right" ? rightMax : leftMax;
-    return item.values.map((value, index) => `${xFor(index)},${yFor(value, max)}`).join(" ");
+    return item.values.map((value, index) => [xFor(index), yFor(value, max)]);
+  }
+
+  function straightPath(points: Point[]): string {
+    return points
+      .map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x} ${y}`)
+      .join(" ");
+  }
+
+  /**
+   * Catmull-Rom converted to cubic Béziers at 1/6 tension — the same curve as
+   * `pointsToSmoothPath` in usage-analytics-overview.html. Control points are
+   * derived from each point's neighbours, so the stroke passes through every
+   * data point rather than being smoothed away from it.
+   */
+  function smoothPath(points: Point[]): string {
+    if (points.length < 2) return straightPath(points);
+    let d = `M ${points[0][0]} ${points[0][1]}`;
+    for (let i = 0; i < points.length - 1; i += 1) {
+      const previous = points[i - 1] ?? points[i];
+      const start = points[i];
+      const end = points[i + 1];
+      const next = points[i + 2] ?? end;
+      const c1x = start[0] + (end[0] - previous[0]) / 6;
+      const c1y = start[1] + (end[1] - previous[1]) / 6;
+      const c2x = end[0] - (next[0] - start[0]) / 6;
+      const c2y = end[1] - (next[1] - start[1]) / 6;
+      d += ` C ${c1x} ${c1y}, ${c2x} ${c2y}, ${end[0]} ${end[1]}`;
+    }
+    return d;
+  }
+
+  function isSmooth(item: Series): boolean {
+    return item.smooth ?? item.kind !== "bar";
+  }
+
+  function strokePathFor(item: Series): string {
+    const points = coordsFor(item);
+    return isSmooth(item) ? smoothPath(points) : straightPath(points);
+  }
+
+  /** The stroke, then down to the baseline and back to close the fill. */
+  function areaPathFor(item: Series): string {
+    const points = coordsFor(item);
+    if (points.length < 2) return "";
+    const last = points[points.length - 1][0];
+    const first = points[0][0];
+    return `${strokePathFor(item)} L ${last} ${baseline} L ${first} ${baseline} Z`;
+  }
+
+  /**
+   * Bars sit in a band per point, sharing it between the bar series so
+   * Success and Errors read as a pair. Edge bands are nudged inward so the
+   * first and last bar are not clipped by the viewBox.
+   */
+  const barBand = $derived(pointCount > 0 ? VIEW_W / pointCount : VIEW_W);
+
+  /**
+   * The viewBox is stretched horizontally (preserveAspectRatio="none"), so a
+   * width in viewBox units is not a width in pixels. Converting through the
+   * measured plot width is what lets the cap below be a real 16px.
+   */
+  const unitsPerPixel = $derived(plotWidth > 0 ? VIEW_W / plotWidth : 0);
+
+  const barGap = $derived(BAR_GAP_PX * unitsPerPixel);
+
+  const barWidth = $derived.by(() => {
+    const count = barSeries.length;
+    if (count === 0) return 0;
+    const available = barBand * 0.62;
+    if (unitsPerPixel <= 0) return available / count;
+    /** The gaps come out of the band first, so dense ranges still show them. */
+    const share = Math.max(0, available - barGap * (count - 1)) / count;
+    return Math.min(share, MAX_BAR_PX * unitsPerPixel);
+  });
+
+  /** Derived from the capped width so a Success/Errors pair stays centred. */
+  const barGroupWidth = $derived(
+    barWidth * barSeries.length + barGap * Math.max(0, barSeries.length - 1),
+  );
+
+  function barX(seriesIndex: number, index: number): number {
+    const start = xFor(index) - barGroupWidth / 2;
+    const clamped = Math.min(Math.max(start, 0), Math.max(0, VIEW_W - barGroupWidth));
+    return clamped + seriesIndex * (barWidth + barGap);
+  }
+
+  function barTop(item: Series, value: number): number {
+    return yFor(value, item.axis === "right" ? rightMax : leftMax);
   }
 
   /** Evenly spaced label slots, always keeping the first and last point. */
@@ -136,6 +249,7 @@ SPDX-License-Identifier: Apache-2.0
   <div
     class="plot-container"
     bind:this={plotEl}
+    bind:clientWidth={plotWidth}
     onmousemove={handleMove}
     onmouseleave={() => (hoverIndex = null)}
     role="presentation"
@@ -153,9 +267,31 @@ SPDX-License-Identifier: Apache-2.0
       preserveAspectRatio="none"
       aria-hidden="true"
     >
-      {#each plotted as item (item.key)}
-        <polyline
-          points={pointsFor(item)}
+      <!-- areas sit furthest back so a line drawn over them stays readable -->
+      {#each curveSeries as item (item.key)}
+        {#if item.kind === "area" && item.values.length > 1}
+          <path d={areaPathFor(item)} fill={item.color} fill-opacity="0.12" stroke="none" />
+        {/if}
+      {/each}
+
+      {#each barSeries as item, seriesIndex (item.key)}
+        {#each item.values as value, index (index)}
+          {@const top = barTop(item, value)}
+          <rect
+            x={barX(seriesIndex, index)}
+            y={top}
+            width={barWidth}
+            height={Math.max(0, baseline - top)}
+            rx="1"
+            fill={item.color}
+            fill-opacity={hoverIndex === null || hoverIndex === index ? 1 : 0.45}
+          />
+        {/each}
+      {/each}
+
+      {#each curveSeries as item (item.key)}
+        <path
+          d={strokePathFor(item)}
           fill="none"
           stroke={item.color}
           stroke-width="2.2"
@@ -164,7 +300,7 @@ SPDX-License-Identifier: Apache-2.0
           vector-effect="non-scaling-stroke"
         />
       {/each}
-      {#each plotted as item (item.key)}
+      {#each curveSeries as item (item.key)}
         {#each item.values as value, index (index)}
           <circle
             cx={xFor(index)}
@@ -177,7 +313,8 @@ SPDX-License-Identifier: Apache-2.0
           />
         {/each}
       {/each}
-      {#if hoverIndex !== null}
+      <!-- bar charts mark the hovered band by dimming the others instead -->
+      {#if hoverIndex !== null && curveSeries.length > 0}
         <line
           x1={xFor(hoverIndex)}
           y1="0"

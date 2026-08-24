@@ -139,6 +139,8 @@ SPDX-License-Identifier: Apache-2.0
       color: string;
       values: number[];
       axis?: "left" | "right";
+      kind?: "line" | "area" | "bar";
+      smooth?: boolean;
       tooltipOnly?: boolean;
       format?: (value: number) => string;
     }[];
@@ -209,18 +211,19 @@ SPDX-License-Identifier: Apache-2.0
       subtitle: $_("analytics.charts.usageGrowth.subtitle"),
       series: [
         {
-          key: "requests",
-          label: $_("analytics.charts.usageGrowth.requests"),
-          color: "var(--gx-an-line)",
-          values: points.map((point) => point.total_requests),
-          format: formatNumber,
-        },
-        {
           key: "tokens",
           label: $_("analytics.charts.usageGrowth.tokens"),
           color: "var(--gx-an-green)",
           values: points.map((point) => point.total_tokens),
-          axis: "right",
+          kind: "area",
+          format: formatNumber,
+        },
+        {
+          key: "requests",
+          label: $_("analytics.charts.usageGrowth.requests"),
+          color: "var(--gx-an-bar-blue)",
+          values: points.map((point) => point.total_requests),
+          tooltipOnly: true,
           format: formatNumber,
         },
       ],
@@ -254,6 +257,7 @@ SPDX-License-Identifier: Apache-2.0
           label: $_("analytics.charts.apiReliability.success"),
           color: "var(--gx-an-green)",
           values: points.map((point) => point.success_count),
+          kind: "bar",
           format: formatNumber,
         },
         {
@@ -261,6 +265,7 @@ SPDX-License-Identifier: Apache-2.0
           label: $_("analytics.charts.apiReliability.errors"),
           color: "var(--gx-an-red)",
           values: points.map((point) => point.error_count),
+          kind: "bar",
           format: formatNumber,
         },
       ],
@@ -292,8 +297,9 @@ SPDX-License-Identifier: Apache-2.0
         {
           key: "cost",
           label: $_("analytics.charts.costTrend.totalCost"),
-          color: "var(--gx-an-line)",
+          color: "var(--gx-an-green)",
           values: points.map((point) => point.total_cost),
+          kind: "area",
           format: formatCurrencyPrecise,
         },
       ],

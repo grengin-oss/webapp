@@ -169,7 +169,7 @@
       },
       "usageGrowth": {
         "title": "사용량 증가",
-        "subtitle": "요청 (막대) • 토큰 (선)",
+        "subtitle": "시간 경과에 따른 토큰 사용량",
         "requests": "요청",
         "tokens": "토큰"
       },
