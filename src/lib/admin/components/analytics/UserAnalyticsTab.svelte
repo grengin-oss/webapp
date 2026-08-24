@@ -839,7 +839,10 @@ SPDX-License-Identifier: Apache-2.0
   }
 
   .table-container {
-    min-width: 1120px;
+    /* Must cover the track list below: 1024px of columns + 9x12px gaps +
+       32px padding = 1164px. Anything smaller caps .table-scroll's
+       scrollWidth early and clips the Last Active column. */
+    min-width: 1164px;
     border-radius: 12px;
     overflow: hidden;
   }
