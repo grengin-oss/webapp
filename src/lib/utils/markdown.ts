@@ -8,6 +8,11 @@ import DOMPurify from 'dompurify';
 // Configure marked renderer for code blocks
 const renderer = new marked.Renderer();
 
+renderer.link = function({ href, title, text }: { href: string; title?: string | null; text: string }) {
+  const titleAttr = title ? ` title="${title}"` : '';
+  return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`;
+};
+
 renderer.code = function({ text, lang }: { text: string; lang?: string }) {
   if (lang && hljs.getLanguage(lang)) {
     try {
