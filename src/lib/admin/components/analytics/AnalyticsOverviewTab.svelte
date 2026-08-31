@@ -166,7 +166,7 @@ SPDX-License-Identifier: Apache-2.0
         {
           key: "tokens",
           label: $_("analytics.charts.multiMetric.tokens"),
-          color: "var(--gx-an-green)",
+          color: "var(--gx-an-area)",
           values: points.map((point) => point.total_tokens),
           tooltipOnly: true,
           format: formatNumber,
@@ -213,7 +213,7 @@ SPDX-License-Identifier: Apache-2.0
         {
           key: "tokens",
           label: $_("analytics.charts.usageGrowth.tokens"),
-          color: "var(--gx-an-green)",
+          color: "var(--gx-an-area)",
           values: points.map((point) => point.total_tokens),
           kind: "area",
           format: formatNumber,
@@ -255,7 +255,7 @@ SPDX-License-Identifier: Apache-2.0
         {
           key: "success",
           label: $_("analytics.charts.apiReliability.success"),
-          color: "var(--gx-an-green)",
+          color: "var(--gx-an-success)",
           values: points.map((point) => point.success_count),
           kind: "bar",
           format: formatNumber,
@@ -297,7 +297,7 @@ SPDX-License-Identifier: Apache-2.0
         {
           key: "cost",
           label: $_("analytics.charts.costTrend.totalCost"),
-          color: "var(--gx-an-green)",
+          color: "var(--gx-an-area)",
           values: points.map((point) => point.total_cost),
           kind: "area",
           format: formatCurrencyPrecise,
@@ -1088,7 +1088,7 @@ SPDX-License-Identifier: Apache-2.0
 
   .legend {
     display: flex;
-    gap: 16px;
+    gap: 8px;
     align-items: center;
     flex-wrap: wrap;
   }
@@ -1097,6 +1097,12 @@ SPDX-License-Identifier: Apache-2.0
     display: flex;
     gap: 8px;
     align-items: center;
+    /* Keeps the design's even 8px rhythm between dot, label, next dot. */
+    margin-inline-end: 8px;
+  }
+
+  .legend-item:last-child {
+    margin-inline-end: 0;
   }
 
   .legend-dot {
@@ -1179,9 +1185,9 @@ SPDX-License-Identifier: Apache-2.0
     flex: 1;
     min-width: 0;
     font-weight: 600;
-    font-size: 11px;
+    font-size: 14px;
     line-height: 100%;
-    text-transform: uppercase;
+    letter-spacing: 0%;
     color: var(--gx-an-sub);
   }
 

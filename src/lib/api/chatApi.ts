@@ -336,12 +336,19 @@ export async function sendMessage(options: SendMessageOptions): Promise<void> {
             case 'done':
               onDone?.(data);
               break;
-            case 'error':
-              // Parse the error detail and create an ApiError
+            // A mid-stream model/provider failure arrives as `ai_error` and is
+            // still followed by `done`. Both events carry the same rich
+            // `{ detail }` payload, so both surface the same way. Without the
+            // `ai_error` label the event fell through the switch unhandled and
+            // the following `done` finalized an empty assistant turn — the
+            // failure reached the user as silence.
+            case 'ai_error':
+            case 'error': {
               const errorDetail = parseErrorDetail(data);
               const streamError = new ApiError(response.status || 500, errorDetail);
               onError?.(streamError);
               break;
+            }
           }
         }
       }
@@ -411,15 +418,25 @@ export async function searchConversations(query: string): Promise<ConversationLi
 }
 
 /**
+ * Update conversation metadata (title, archived status, pinned status)
+ */
+export async function updateConversation(
+  conversationId: string,
+  payload: { title?: string; archived?: boolean; pinned?: boolean }
+): Promise<ConversationDetail> {
+  return request<ConversationDetail>(`/chat/${conversationId}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  });
+}
+
+/**
  * Archive a conversation
  */
 export async function archiveConversation(conversationId: string, title: string): Promise<ConversationDetail> {
-  return request<ConversationDetail>(`/chat/${conversationId}`, {
-    method: 'PUT',
-    body: JSON.stringify({
-      archived: true,
-      title: title
-    }),
+  return updateConversation(conversationId, {
+    archived: true,
+    title,
   });
 }
 
@@ -430,9 +447,22 @@ export async function renameConversation(
   conversationId: string,
   payload: { title: string; archived: boolean }
 ): Promise<ConversationDetail> {
-  return request<ConversationDetail>(`/chat/${conversationId}`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
+  return updateConversation(conversationId, payload);
+}
+
+/**
+ * Pin or unpin a conversation
+ */
+export async function pinConversation(
+  conversationId: string,
+  pinned: boolean,
+  currentTitle?: string,
+  archived?: boolean
+): Promise<ConversationDetail> {
+  return updateConversation(conversationId, {
+    pinned,
+    ...(currentTitle !== undefined ? { title: currentTitle } : {}),
+    ...(archived !== undefined ? { archived } : {}),
   });
 }
 

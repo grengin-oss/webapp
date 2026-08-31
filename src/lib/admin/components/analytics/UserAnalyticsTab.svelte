@@ -839,10 +839,13 @@ SPDX-License-Identifier: Apache-2.0
   }
 
   .table-container {
-    /* Must cover the track list below: 1024px of columns + 9x12px gaps +
-       32px padding = 1164px. Anything smaller caps .table-scroll's
-       scrollWidth early and clips the Last Active column. */
-    min-width: 1164px;
+    /* The app shell caps .main-content at 1168px, so this table only ever
+       gets 1104px (minus the page's 32px padding either side). The track
+       list below is sized to fit inside that: 988px of columns + 9x8px gaps
+       + 32px padding = 1092px, so no column is clipped at rest. Keep this
+       value in step with the tracks, or .table-scroll caps its scrollWidth
+       early and cuts off Last Active. */
+    min-width: 1092px;
     border-radius: 12px;
     overflow: hidden;
   }
@@ -852,9 +855,9 @@ SPDX-License-Identifier: Apache-2.0
   .user-row {
     display: grid;
     grid-template-columns:
-      minmax(150px, 1.3fr)
-      minmax(160px, 1.5fr)
-      minmax(110px, 1.1fr)
+      minmax(140px, 1.3fr)
+      minmax(140px, 1.5fr)
+      minmax(104px, 1.1fr)
       86px
       78px
       68px
@@ -862,7 +865,7 @@ SPDX-License-Identifier: Apache-2.0
       78px
       96px
       minmax(112px, 1fr);
-    gap: 12px;
+    gap: 8px;
     padding: 12px 16px;
     align-items: center;
   }
@@ -877,10 +880,10 @@ SPDX-License-Identifier: Apache-2.0
     min-width: 0;
     display: flex;
     align-items: center;
-    font-weight: 700;
-    font-size: 11px;
+    font-weight: 600;
+    font-size: 14px;
     line-height: 100%;
-    text-transform: uppercase;
+    letter-spacing: 0%;
     color: var(--gx-an-sub);
   }
 
@@ -905,10 +908,10 @@ SPDX-License-Identifier: Apache-2.0
     align-items: center;
     justify-content: flex-start;
     font-family: inherit;
-    font-weight: 700;
-    font-size: 11px;
+    font-weight: 600;
+    font-size: 14px;
     line-height: 100%;
-    text-transform: uppercase;
+    letter-spacing: 0%;
     color: var(--gx-an-sub);
     cursor: pointer;
   }

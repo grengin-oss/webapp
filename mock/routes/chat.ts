@@ -203,13 +203,18 @@ router.delete('/chat/:chatId', requireAuth, (req, res) => {
   res.status(204).send()
 })
 
-router.post('/chat/stream', requireAuth, async (req, res) => {
+// The frontend posts to /chat/stream for a brand-new conversation and to
+// /chat/stream/:conversationId to continue an existing one (see sendMessage in
+// src/lib/api/chatApi.ts). Both land on the same handler; the path id wins over
+// the body's conversation_id when present.
+router.post(['/chat/stream', '/chat/stream/:conversationId'], requireAuth, async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
   res.setHeader('X-Accel-Buffering', 'no')
 
   const { messages: reqMessages, conversation_id, model_name, provider } = req.body
+  const pathConversationId = req.params.conversationId
 
   if (!reqMessages || !Array.isArray(reqMessages) || reqMessages.length === 0) {
     return res.status(400).json({ detail: 'messages array is required' })
@@ -217,7 +222,7 @@ router.post('/chat/stream', requireAuth, async (req, res) => {
 
   const lastMessage = reqMessages[reqMessages.length - 1]
   const userMessageContent = lastMessage.content
-  const conversationId = conversation_id || faker.string.uuid()
+  const conversationId = pathConversationId || conversation_id || faker.string.uuid()
   const isNewConversation = !conversations.has(conversationId)
 
   // Create conversation if it doesn't exist

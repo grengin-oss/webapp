@@ -9,6 +9,12 @@ import { files, type UserFile, type PaginatedFiles } from '../lib/store.js'
 
 const router = Router()
 
+// Bytes actually uploaded this session, keyed by file id. Lets the download
+// route echo the real file back (so video posters/durations, PDFs and any other
+// type behave as they will against the backend) instead of only synthesising a
+// PNG. Seeded files have no entry and keep the synthesised fallbacks below.
+const uploadedBytes = new Map<string, { data: Buffer; type: string }>()
+
 router.get('/files', requireAuth, (req, res) => {
   const limit = parseInt(req.query.limit as string || '20')
   const offset = parseInt(req.query.offset as string || '0')
@@ -39,11 +45,18 @@ router.get('/files', requireAuth, (req, res) => {
 
 router.post('/files', requireAuth, (req, res) => {
   const fileId = faker.string.uuid()
+  // The client (chatApi.uploadDocument) nests the metadata under `attachment`
+  // and sends the bytes as base64; older callers post the fields flat.
+  const attachment = req.body.attachment ?? {}
+  const base64: string | undefined = attachment.file
+  const decodedSize = base64
+    ? Math.floor((base64.split(',').pop() ?? '').length * 3 / 4)
+    : undefined
   const newFile: UserFile = {
     id: fileId,
-    name: req.body.name || 'untitled.txt',
-    size: req.body.size || 0,
-    type: req.body.type || 'text/plain',
+    name: attachment.name || req.body.name || 'untitled.txt',
+    size: req.body.size || decodedSize || 0,
+    type: attachment.type || req.body.type || 'text/plain',
     description: req.body.description || null,
     url: `/files/${fileId}`,
     download_url: `/files/${fileId}/download`,
@@ -53,6 +66,14 @@ router.post('/files', requireAuth, (req, res) => {
     status: 'uploaded',
   }
   files.set(fileId, newFile)
+  if (base64) {
+    const payload = base64.split(',').pop() ?? ''
+    const data = Buffer.from(payload, 'base64')
+    if (data.length > 0) {
+      uploadedBytes.set(fileId, { data, type: newFile.type })
+      newFile.size = req.body.size || data.length
+    }
+  }
   res.json(newFile)
 })
 
@@ -151,6 +172,14 @@ router.get('/files/:fileId/download', requireAuth, (req, res) => {
   const file = files.get(req.params.fileId)
   if (!file) {
     return res.status(404).json({ detail: 'File not found' })
+  }
+
+  // Real bytes first, for anything uploaded during this session.
+  const uploaded = uploadedBytes.get(file.id)
+  if (uploaded) {
+    res.setHeader('Content-Type', uploaded.type || 'application/octet-stream')
+    res.setHeader('Cache-Control', 'no-store')
+    return res.send(uploaded.data)
   }
 
   if ((file.type || '').startsWith('image/')) {

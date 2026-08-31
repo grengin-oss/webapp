@@ -1350,7 +1350,10 @@
     "retry": "Retry",
     "errors": {
       "fetchFailed": "Failed to fetch overview data"
-    }
+    },
+    "welcomeBack": "Welcome back, {name} 👋",
+    "welcomeSummary": "Your workspace used {cost} across {users} users in the last 30 days",
+    "connectAccount": "Connect Account"
   },
   "systemMetrics": {
     "title": "System",
