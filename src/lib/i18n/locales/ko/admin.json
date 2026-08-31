@@ -1296,7 +1296,10 @@
     "retry": "재시도",
     "errors": {
       "fetchFailed": "개요 데이터를 가져오지 못했습니다"
-    }
+    },
+    "welcomeBack": "다시 오셨네요, {name}님 👋",
+    "welcomeSummary": "지난 30일 동안 워크스페이스의 사용자 {users}명이 {cost}을 사용했습니다",
+    "connectAccount": "계정 연결"
   },
   "systemMetrics": {
     "title": "시스템",

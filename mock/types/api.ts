@@ -2022,6 +2022,8 @@ export interface components {
             updated_at?: string;
             /** @description Whether web search is enabled for the conversation */
             web_search_enabled?: boolean;
+            /** @description Whether the conversation is pinned */
+            pinned?: boolean;
         };
         /** @enum {string} */
         MessageRole: "user" | "assistant" | "system" | "tool";
@@ -3162,6 +3164,7 @@ export interface operations {
                 "application/json": {
                     title?: string;
                     archived?: boolean;
+                    pinned?: boolean;
                 };
             };
         };

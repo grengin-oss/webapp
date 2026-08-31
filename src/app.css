@@ -242,8 +242,18 @@
   --gx-hair-strong: rgb(209, 213, 219);
   --gx-slate-400: rgb(148, 163, 184);
   --gx-slate-500: rgb(100, 116, 139);
+  /* composer attach/tools icon ink (Figma 159:15193, round 2) */
+  --gx-slate-600: rgb(71, 84, 103);
   --gx-slate-700: rgb(55, 65, 81);
   --gx-slate-900: rgb(15, 23, 42);
+  /* chat empty-state sticker's middle disc (Figma 159:15193, round 2) */
+  --gx-sticker-disc: rgb(245, 246, 244);
+  /* suggestion-card title ink, a hair lighter than --gx-slate-900 */
+  --gx-card-title-ink: rgb(28, 41, 56);
+  /* faint blue-tinted card ring (suggestion cards, round 2) */
+  --gx-ring-soft: rgb(239, 244, 252);
+  /* composer "Tools" chip's selected-count badge */
+  --gx-tools-badge: rgb(74, 125, 212);
   --gx-teal: rgb(13, 148, 136);
   --gx-teal-soft: rgb(204, 251, 241);
   --gx-send: rgb(37, 117, 87);
@@ -261,6 +271,8 @@
   --gx-org-brand-alt: rgb(43, 145, 107);
   --gx-org-brand-alt-hover: rgb(37, 128, 94);
   --gx-org-brand-tint: rgb(230, 244, 240);
+  /* chat empty-state suggestion-card icon tile (Figma 159:15193, round 2) */
+  --gx-org-brand-alt-tint: rgb(241, 248, 244);
   --gx-org-sel: rgb(235, 245, 240);
   --gx-org-sel-hover: rgb(228, 241, 235);
   --gx-org-ink: rgb(14, 24, 40);
@@ -312,6 +324,11 @@
   --gx-an-mint: rgb(222, 240, 233);
   --gx-an-mint-fg: rgb(37, 117, 87);
   --gx-an-green: rgb(16, 185, 129);
+  /* The design uses three distinct greens: --gx-an-green for the Total Users
+     stat card, this teal for the Usage Growth / Cost Trend areas, and
+     --gx-an-success for the API Reliability Success bars. */
+  --gx-an-area: rgb(34, 139, 119);
+  --gx-an-success: rgb(34, 197, 136);
   --gx-an-red: rgb(239, 68, 68);
   --gx-an-bar-blue: rgb(95, 141, 206);
   --gx-an-badge-down-bg: rgb(254, 226, 226);
@@ -328,8 +345,65 @@
   --gx-an-violet: rgb(124, 58, 237);
   --gx-an-rose: rgb(219, 39, 119);
   --gx-an-field-bg: rgb(249, 250, 251);
+
+  /* ---- Control Hub Overview (control-hub-overview.html) ---- */
+  --gx-ch-banner: linear-gradient(
+    90deg,
+    rgb(53, 92, 187) 0%,
+    rgb(45, 77, 161) 48.56%,
+    rgb(36, 59, 132) 100%
+  );
+  --gx-ch-banner-sub: rgb(168, 184, 216);
+  --gx-ch-connect-bg: rgb(0, 147, 106);
+  --gx-ch-connect-bg-hover: rgb(0, 130, 94);
+  --gx-ch-chevron-bg: rgb(233, 236, 239);
+  --gx-ch-card-hover-ring: rgb(203, 213, 225);
+  --gx-ch-card-hover-shadow: 0 4px 12px 0 rgba(15, 23, 42, 0.05);
   --gx-an-avatar-bg: rgb(226, 232, 240);
   --gx-an-avatar-fg: rgb(76, 92, 86);
+
+  /* ---- Chat composer pickers (chat-empty-state.html, round 3) ----
+     The attach / model / tools / image dropdowns and the image-mode banner.
+     Light values are canonical; the dark block below remaps every one. */
+  --gx-cx-panel-ring: rgb(228, 231, 236);
+  --gx-cx-panel-shadow: 0 12px 24px 0 rgba(0, 0, 0, 0.0588);
+  --gx-cx-row-hover: rgb(249, 250, 251);
+  --gx-cx-ink: rgb(29, 41, 57);
+  --gx-cx-sub: rgb(102, 112, 133);
+  --gx-cx-pill-ring: rgb(208, 213, 221);
+  --gx-cx-tag-bg: rgb(242, 244, 247);
+  --gx-cx-toggle-on: rgb(18, 183, 106);
+  --gx-cx-toggle-off: rgb(228, 231, 236);
+  --gx-cx-img-accent: rgb(110, 79, 201);
+  --gx-cx-img-tint: rgb(243, 239, 253);
+
+  /* ---- Chat transcript (chat-empty-state.html, round 4) ----
+     The conversation view: AI logo/avatar, the 500px image card, the
+     image/video/file attachment grid and the follow-up action chips.
+     Light values are canonical; the dark block below remaps every one. */
+  --gx-tx-logo-bg: rgb(16, 18, 20);
+  --gx-tx-avatar-bg: rgb(33, 37, 41);
+  --gx-tx-ink: rgb(33, 37, 41);
+  --gx-tx-card-ring: rgb(66, 122, 198);
+  /* Same hue as the ring in light, but kept full-strength for TEXT (the
+     filename camera glyph and the MIME tag) where the ring's dark-mode alpha
+     would fall below a readable contrast. */
+  --gx-tx-accent: rgb(66, 122, 198);
+  --gx-tx-card-shadow: 0 8px 24px 0 rgba(13, 148, 136, 0.12);
+  --gx-tx-overlay-bg: rgba(14, 24, 40, 0.85);
+  --gx-tx-overlay-btn-bg: rgba(255, 255, 255, 0.15);
+  --gx-tx-meta-bg: rgb(248, 250, 252);
+  --gx-tx-meta-name: rgb(14, 24, 40);
+  --gx-tx-meta-size: rgb(107, 114, 129);
+  --gx-tx-chip-ring: rgb(233, 236, 239);
+  --gx-tx-chip-icon-fg: rgb(59, 103, 189);
+  --gx-tx-att-img-from: rgb(66, 122, 198);
+  --gx-tx-att-img-to: rgb(239, 244, 252);
+  --gx-tx-att-vid-from: rgb(28, 41, 56);
+  --gx-tx-att-vid-to: rgb(107, 114, 129);
+  --gx-tx-file-icon-bg: rgb(253, 236, 236);
+  --gx-tx-file-icon-fg: rgb(239, 68, 68);
+  --gx-tx-file-size: rgb(156, 163, 176);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -381,8 +455,13 @@
     --gx-hair-strong: rgba(255, 255, 255, 0.18);
     --gx-slate-400: #8d9aab;
     --gx-slate-500: #a3aebd;
+    --gx-slate-600: #b7c0cd;
     --gx-slate-700: #d3d9e1;
     --gx-slate-900: #f1f4f8;
+    --gx-sticker-disc: #23262b;
+    --gx-card-title-ink: var(--gx-slate-900);
+    --gx-ring-soft: rgba(255, 255, 255, 0.04);
+    --gx-tools-badge: rgb(88, 138, 224);
     --gx-teal: #3fd0bd;
     --gx-teal-soft: rgba(13, 148, 136, 0.22);
     --gx-send: rgb(37, 117, 87);
@@ -398,6 +477,7 @@
     --gx-org-brand-alt: #4fbf95;
     --gx-org-brand-alt-hover: #66cba6;
     --gx-org-brand-tint: rgba(45, 144, 107, 0.22);
+    --gx-org-brand-alt-tint: rgba(45, 144, 107, 0.18);
     --gx-org-sel: rgba(45, 144, 107, 0.18);
     --gx-org-sel-hover: rgba(45, 144, 107, 0.26);
     --gx-org-ink: #f1f4f8;
@@ -428,6 +508,8 @@
     --gx-an-mint: rgba(45, 144, 107, 0.24);
     --gx-an-mint-fg: #7fd3b0;
     --gx-an-green: #34d399;
+    --gx-an-area: #2dd4bf;
+    --gx-an-success: #34d399;
     --gx-an-red: #f87171;
     --gx-an-bar-blue: #6f9dfb;
     --gx-an-badge-down-bg: rgba(239, 68, 68, 0.18);
@@ -438,6 +520,20 @@
     --gx-an-insight-fg: #dfe4e2;
     --gx-an-thead-bg: rgba(255, 255, 255, 0.04);
     --gx-an-table-ring: rgba(255, 255, 255, 0.08);
+
+    /* Control Hub Overview */
+    --gx-ch-banner: linear-gradient(
+      90deg,
+      rgb(40, 70, 145) 0%,
+      rgb(33, 58, 122) 48.56%,
+      rgb(26, 44, 100) 100%
+    );
+    --gx-ch-banner-sub: rgb(178, 192, 220);
+    --gx-ch-connect-bg: rgb(0, 160, 115);
+    --gx-ch-connect-bg-hover: rgb(0, 176, 127);
+    --gx-ch-chevron-bg: rgba(255, 255, 255, 0.1);
+    --gx-ch-card-hover-ring: rgba(255, 255, 255, 0.18);
+    --gx-ch-card-hover-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.35);
     --gx-an-input-bg: rgba(255, 255, 255, 0.05);
     --gx-an-strong: #eef1f0;
     --gx-an-amber: #f0b357;
@@ -446,6 +542,41 @@
     --gx-an-field-bg: rgba(255, 255, 255, 0.04);
     --gx-an-avatar-bg: rgba(255, 255, 255, 0.09);
     --gx-an-avatar-fg: #c2cac6;
+
+    /* Chat composer pickers */
+    --gx-cx-panel-ring: rgba(255, 255, 255, 0.12);
+    --gx-cx-panel-shadow: 0 12px 24px 0 rgba(0, 0, 0, 0.45);
+    --gx-cx-row-hover: rgba(255, 255, 255, 0.06);
+    --gx-cx-ink: #eef1f0;
+    --gx-cx-sub: #9aa5a0;
+    --gx-cx-pill-ring: rgba(255, 255, 255, 0.18);
+    --gx-cx-tag-bg: rgba(255, 255, 255, 0.09);
+    --gx-cx-toggle-on: #34d399;
+    --gx-cx-toggle-off: rgba(255, 255, 255, 0.24);
+    --gx-cx-img-accent: #b494f5;
+    --gx-cx-img-tint: rgba(110, 79, 201, 0.24);
+
+    /* Chat transcript */
+    --gx-tx-logo-bg: rgba(255, 255, 255, 0.14);
+    --gx-tx-avatar-bg: rgba(255, 255, 255, 0.14);
+    --gx-tx-ink: #eef1f0;
+    --gx-tx-card-ring: rgba(112, 155, 218, 0.55);
+    --gx-tx-accent: rgb(147, 174, 234);
+    --gx-tx-card-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.4);
+    --gx-tx-overlay-bg: rgba(0, 0, 0, 0.72);
+    --gx-tx-overlay-btn-bg: rgba(255, 255, 255, 0.18);
+    --gx-tx-meta-bg: rgba(255, 255, 255, 0.05);
+    --gx-tx-meta-name: #eef1f0;
+    --gx-tx-meta-size: #9aa5a0;
+    --gx-tx-chip-ring: rgba(255, 255, 255, 0.14);
+    --gx-tx-chip-icon-fg: #93aeea;
+    --gx-tx-att-img-from: rgb(66, 122, 198);
+    --gx-tx-att-img-to: rgba(255, 255, 255, 0.12);
+    --gx-tx-att-vid-from: rgb(28, 41, 56);
+    --gx-tx-att-vid-to: rgb(80, 88, 100);
+    --gx-tx-file-icon-bg: rgba(239, 68, 68, 0.18);
+    --gx-tx-file-icon-fg: #f87171;
+    --gx-tx-file-size: #8d9aab;
     --gx-org-field-bg: rgba(255, 255, 255, 0.04);
     --gx-org-primary-500: rgb(112, 155, 218);
     --gx-org-primary-500-hover: rgb(134, 172, 227);

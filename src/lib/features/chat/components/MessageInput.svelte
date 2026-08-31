@@ -12,10 +12,15 @@ SPDX-License-Identifier: Apache-2.0
     SpeechRecognitionEvent,
     SpeechRecognitionErrorEvent,
   } from "../../../api/models";
-  import { isImageModel, isSelectableChatModel } from "../../../api/models";
+  import {
+    findModel,
+    isImageModel,
+    isSelectableChatModel,
+  } from "../../../api/models";
   import { uploadDocument, type UploadedFile } from "../../../api/chatApi";
   import type { MCPServer } from "../../../admin/types.js";
   import { _ } from "svelte-i18n";
+  import { navigate } from "svelte-routing";
   import SkillPicker from "./SkillPicker.svelte";
   import {
     providerIconSvg,
@@ -37,7 +42,8 @@ SPDX-License-Identifier: Apache-2.0
     providers?: ProviderInfo[];
     loadingModels?: boolean;
     modelsError?: string | null;
-    mcpServers?: MCPServer[];
+    /** Connectors from GET /mcp-servers. `connected` is the per-user OAuth state. */
+    mcpServers?: (MCPServer & { connected?: boolean })[];
     selectedMcpServers?: string[];
     loadingMcpServers?: boolean;
     mcpServersError?: string | null;
@@ -104,14 +110,223 @@ SPDX-License-Identifier: Apache-2.0
   let failedUploads = $state<Set<string>>(new Set());
   let filePreviews = $state<Record<string, string>>({});
   let imageThumbnails = $state<Record<string, string>>({});
+  // Video posters are object URLs (a data URL would inline the whole file), so
+  // every one added here must be revoked when the file goes away.
+  let videoPosters = $state<Record<string, string>>({});
+  let videoDurations = $state<Record<string, string>>({});
   let showFilePreview = $state(false);
   let showImagePreview = $state(false);
   let currentPreviewFile = $state<File | null>(null);
   let currentPreviewImage = $state<{ file: File; url: string } | null>(null);
-  let showPlusMenu = $state(false);
-  let skillPickerOpen = $state(false);
-  let showModelDropdown = $state(false);
-  let showConnectorsDropdown = $state(false);
+
+  // ===== Composer menus (design: chat-empty-state.html, .dropdown-anchor) =====
+  // One menu at a time, exactly like the design: opening a chip closes the rest.
+  type ComposerMenu = "attach" | "model" | "tools" | "image";
+  let openMenu = $state<ComposerMenu | null>(null);
+
+  function toggleMenu(menu: ComposerMenu) {
+    openMenu = openMenu === menu ? null : menu;
+  }
+
+  function closeMenus() {
+    openMenu = null;
+  }
+
+  // ===== Registry-derived model groupings =====
+  // The registry exposes no "latest" flag, so newest-first registry order is the
+  // convention (same rule as modelPreferences.ts): a provider's first text model
+  // is the one tagged LATEST, and everything past VISIBLE_MODELS_PER_BRAND is
+  // what the design folds away behind the "legacy models" link.
+  const VISIBLE_MODELS_PER_BRAND = 2;
+
+  interface BrandGroup {
+    provider: ProviderInfo;
+    models: ModelInfo[];
+  }
+
+  interface ModelEntry {
+    provider: ProviderInfo;
+    model: ModelInfo;
+  }
+
+  /**
+   * Group the registry into one row per BRAND, keyed by provider key rather
+   * than by array position. The registry can return the same provider key more
+   * than once (an org with two engines configured against one brand), and the
+   * picker must still draw a single "Anthropic" row — a keyed `{#each}` over
+   * raw positions throws `each_key_duplicate` on the repeat. Models are deduped
+   * by key for the same reason, and the first occurrence wins so registry order
+   * (newest first) still decides which model carries the LATEST tag.
+   */
+  function groupByBrand(
+    list: ProviderInfo[],
+    pick: (models: ModelInfo[]) => ModelInfo[],
+  ): BrandGroup[] {
+    const groups = new Map<string, BrandGroup>();
+    for (const provider of list) {
+      const picked = pick(provider.models ?? []);
+      if (picked.length === 0) continue;
+
+      let group = groups.get(provider.key);
+      if (!group) {
+        group = { provider, models: [] };
+        groups.set(provider.key, group);
+      }
+      const seen = new Set(group.models.map((m) => m.key));
+      for (const model of picked) {
+        if (seen.has(model.key)) continue;
+        seen.add(model.key);
+        group.models.push(model);
+      }
+    }
+    return [...groups.values()];
+  }
+
+  /** Brands offering at least one selectable text model, in registry order. */
+  const textBrands = $derived<BrandGroup[]>(
+    groupByBrand(providers, (models) => splitModels(models).text),
+  );
+
+  /** Every image-generation model across brands — the Image picker's list. */
+  const imageEntries = $derived<ModelEntry[]>(
+    groupByBrand(providers, (models) => splitModels(models).image).flatMap(
+      (brand) =>
+        brand.models.map((model) => ({ provider: brand.provider, model })),
+    ),
+  );
+
+  /** RECOMMENDED = the model in use, then each brand's newest. Capped at 3. */
+  const recommendedModels = $derived.by<ModelEntry[]>(() => {
+    const out: ModelEntry[] = [];
+    const seen = new Set<string>();
+    const push = (provider: ProviderInfo, model: ModelInfo) => {
+      if (seen.has(model.key)) return;
+      seen.add(model.key);
+      out.push({ provider, model });
+    };
+    const current = findModel(providers, selectedModel);
+    if (current && !isImageModel(current.model)) {
+      push(current.provider, current.model);
+    }
+    for (const brand of textBrands) push(brand.provider, brand.models[0]);
+    return out.slice(0, 3);
+  });
+
+  let modelQuery = $state("");
+  const modelQueryTerm = $derived(modelQuery.trim().toLowerCase());
+
+  /** Flat search across model name, key and provider name. */
+  const modelSearchResults = $derived.by<ModelEntry[]>(() => {
+    const term = modelQueryTerm;
+    if (!term) return [];
+    const out: ModelEntry[] = [];
+    for (const brand of textBrands) {
+      for (const model of brand.models) {
+        if (
+          model.name.toLowerCase().includes(term) ||
+          model.key.toLowerCase().includes(term) ||
+          brand.provider.name.toLowerCase().includes(term)
+        ) {
+          out.push({ provider: brand.provider, model });
+        }
+      }
+    }
+    return out;
+  });
+
+  function isModelSelected(model: ModelInfo): boolean {
+    return selectedModel === model.key || selectedModel === model.name;
+  }
+
+  // ---- brand folds ----
+  let expandedBrands = $state<Set<string>>(new Set());
+  let brandsInitialised = $state(false);
+
+  // Open the brand that owns the current model the first time the registry lands.
+  $effect(() => {
+    if (brandsInitialised || textBrands.length === 0) return;
+    const current = findModel(providers, selectedModel);
+    const key =
+      current && !isImageModel(current.model)
+        ? current.provider.key
+        : textBrands[0].provider.key;
+    expandedBrands = new Set([key]);
+    brandsInitialised = true;
+  });
+
+  function toggleBrand(key: string) {
+    const next = new Set(expandedBrands);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    expandedBrands = next;
+  }
+
+  let expandedLegacy = $state<Set<string>>(new Set());
+
+  function revealLegacy(key: string) {
+    expandedLegacy = new Set([...expandedLegacy, key]);
+  }
+
+  function visibleBrandModels(brand: BrandGroup): ModelInfo[] {
+    return expandedLegacy.has(brand.provider.key)
+      ? brand.models
+      : brand.models.slice(0, VISIBLE_MODELS_PER_BRAND);
+  }
+
+  function hiddenBrandCount(brand: BrandGroup): number {
+    return expandedLegacy.has(brand.provider.key)
+      ? 0
+      : Math.max(0, brand.models.length - VISIBLE_MODELS_PER_BRAND);
+  }
+
+  // ---- image mode ----
+  // The banner/lock state is driven by the model that is actually selected
+  // (`imageModelSelected` from the parent), never by a separate mode flag — so
+  // the composer can never claim a mode the request will not use.
+  let lastTextSelection = $state<{ provider: string; model: string } | null>(
+    null,
+  );
+
+  $effect(() => {
+    if (!imageModelSelected && selectedModel) {
+      lastTextSelection = {
+        provider: selectedProvider ?? "",
+        model: selectedModel,
+      };
+    }
+  });
+
+  /** Leave image mode by restoring the previous text model. */
+  function exitImageMode() {
+    const previous = lastTextSelection;
+    if (previous) {
+      const found = findModel(providers, previous.model);
+      if (found && !isImageModel(found.model)) {
+        onModelSelect?.(found.provider, found.model);
+        closeMenus();
+        return;
+      }
+    }
+    const firstBrand = textBrands[0];
+    if (firstBrand) onModelSelect?.(firstBrand.provider, firstBrand.models[0]);
+    else onRemoveModel?.();
+    closeMenus();
+  }
+
+  // ---- connectors ----
+  /** Per-user connection state from GET /mcp-servers (falls back to status). */
+  function isConnectorConnected(
+    server: MCPServer & { connected?: boolean },
+  ): boolean {
+    if (typeof server.connected === "boolean") return server.connected;
+    return server.status === "connected";
+  }
+
+  /** Skills currently on — reported upward by SkillPicker for the Tools badge. */
+  let activeSkillCount = $state(0);
+  const toolsBadgeCount = $derived(
+    selectedMcpServers.length + activeSkillCount,
+  );
 
   // Voice input state
   let isRecording = $state(false);
@@ -203,6 +418,11 @@ SPDX-License-Identifier: Apache-2.0
         readFileContent(file).then((content) => {
           filePreviews[file.name] = content;
         });
+      } else if (isVideoFile(file)) {
+        videoPosters = {
+          ...videoPosters,
+          [file.name]: URL.createObjectURL(file),
+        };
       } else if (isImageFile(file)) {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -297,6 +517,9 @@ SPDX-License-Identifier: Apache-2.0
         webSearchEnabled,
       );
       message = "";
+      Object.keys(videoPosters).forEach(releaseVideoPoster);
+      videoPosters = {};
+      videoDurations = {};
       attachedFiles = [];
       uploadedFileResults = new Map();
       failedUploads = new Set();
@@ -308,14 +531,10 @@ SPDX-License-Identifier: Apache-2.0
     }
   }
 
-  function togglePlusMenu() {
-    showPlusMenu = !showPlusMenu;
-    if (showPlusMenu) showModelDropdown = false;
-  }
-
   function selectModel(provider: ProviderInfo, model: ModelInfo) {
     onModelSelect?.(provider, model);
-    showModelDropdown = false;
+    modelQuery = "";
+    closeMenus();
   }
 
   // Expose focus method for external callers
@@ -371,7 +590,7 @@ SPDX-License-Identifier: Apache-2.0
 
   function handleFileSelect() {
     fileInput?.click();
-    showPlusMenu = false;
+    closeMenus();
   }
 
   function handleFileChange(event: Event) {
@@ -379,7 +598,7 @@ SPDX-License-Identifier: Apache-2.0
     if (target.files) {
       addFiles(Array.from(target.files));
     }
-    showPlusMenu = false;
+    closeMenus();
     target.value = "";
   }
 
@@ -408,6 +627,7 @@ SPDX-License-Identifier: Apache-2.0
         currentPreviewImage = null;
       }
     }
+    if (file) releaseVideoPoster(file.name);
   }
 
   function isTextFile(file: File): boolean {
@@ -459,6 +679,34 @@ SPDX-License-Identifier: Apache-2.0
       textTypes.some((type) => file.type.startsWith(type)) ||
       textExtensions.some((ext) => file.name.toLowerCase().endsWith(ext))
     );
+  }
+
+  function isVideoFile(file: File): boolean {
+    return file.type.startsWith("video/");
+  }
+
+  function formatDuration(seconds: number): string {
+    if (!Number.isFinite(seconds)) return "";
+    const total = Math.round(seconds);
+    return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, "0")}`;
+  }
+
+  // ".att-video__time" shows a real duration, read off the loaded metadata —
+  // never a guess.
+  function handleVideoMetadata(name: string, event: Event) {
+    const label = formatDuration(
+      (event.currentTarget as HTMLVideoElement).duration,
+    );
+    if (!label) return;
+    videoDurations = { ...videoDurations, [name]: label };
+  }
+
+  function releaseVideoPoster(name: string) {
+    const url = videoPosters[name];
+    if (!url) return;
+    URL.revokeObjectURL(url);
+    delete videoPosters[name];
+    delete videoDurations[name];
   }
 
   function isImageFile(file: File): boolean {
@@ -620,34 +868,134 @@ SPDX-License-Identifier: Apache-2.0
     }
   }
 
-  // Close dropdowns when clicking outside
+  // Close whichever menu is open when the click lands outside every anchor.
   function handleClickOutside(event: MouseEvent) {
     const target = event.target as HTMLElement;
-    if (
-      !target.closest(".plus-menu-container") &&
-      !target.closest(".plus-btn")
-    ) {
-      showPlusMenu = false;
-    }
-    if (
-      !target.closest(".model-dropdown-container") &&
-      !target.closest(".model-selector-btn")
-    ) {
-      showModelDropdown = false;
-    }
-    if (
-      !target.closest(".connectors-dropdown-container") &&
-      !target.closest(".connectors-selector-btn")
-    ) {
-      showConnectorsDropdown = false;
+    if (!target.closest(".dropdown-anchor")) closeMenus();
+  }
+
+  function handleMenuKeydown(event: KeyboardEvent) {
+    if (event.key === "Escape" && openMenu) {
+      event.stopPropagation();
+      closeMenus();
     }
   }
 
   onMount(() => {
     document.addEventListener("click", handleClickOutside);
-    return () => document.removeEventListener("click", handleClickOutside);
+    document.addEventListener("keydown", handleMenuKeydown);
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+      document.removeEventListener("keydown", handleMenuKeydown);
+      Object.keys(videoPosters).forEach(releaseVideoPoster);
+    };
   });
 </script>
+
+{#snippet chevron(open: boolean)}
+  <svg
+    class="cx-chev"
+    class:cx-chev--open={open}
+    width="12"
+    height="12"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    aria-hidden="true"
+  >
+    <polyline points="6 9 12 15 18 9"></polyline>
+  </svg>
+{/snippet}
+
+{#snippet checkMark(cls: string)}
+  <svg
+    class={cls}
+    xmlns="http://www.w3.org/2000/svg"
+    width="14"
+    height="14"
+    viewBox="0 0 14 14"
+    fill="none"
+  >
+    <g clip-path="url(#clip0_855_1889)">
+      <path
+        d="M12.7167 5.83345C12.9831 7.14087 12.7932 8.50011 12.1788 9.6845C11.5643 10.8689 10.5624 11.8068 9.34008 12.3419C8.11778 12.877 6.74898 12.9768 5.46196 12.6248C4.17493 12.2728 3.04748 11.4903 2.26761 10.4076C1.48774 9.32496 1.1026 8.00767 1.17642 6.67542C1.25023 5.34318 1.77854 4.0765 2.67324 3.08663C3.56794 2.09676 4.77495 1.44353 6.09299 1.23588C7.41102 1.02823 8.7604 1.2787 9.91611 1.94553M5.24967 6.4165L6.99967 8.1665L12.833 2.33317"
+        stroke="#4A7DD4"
+        stroke-width="2"
+        stroke-linecap="round"
+      />
+    </g>
+    <defs>
+      <clipPath id="clip0_855_1889">
+        <rect width="14" height="14" fill="white" />
+      </clipPath>
+    </defs>
+  </svg>
+{/snippet}
+
+{#snippet brandBadge(provider: ProviderInfo)}
+  {@const providerIcon = getIconForTheme(provider)}
+  {@const iconSvg = providerIconSvg(providerIcon)}
+  {@const iconUrl = providerIconUrl(providerIcon)}
+  {#if iconSvg}
+    <span class="brand-badge brand-badge--icon" aria-hidden="true"
+      >{@html iconSvg}</span
+    >
+  {:else if iconUrl}
+    <img src={iconUrl} alt="" class="brand-badge brand-badge--icon" />
+  {:else}
+    <span class="brand-badge" aria-hidden="true"
+      >{provider.name.charAt(0).toUpperCase()}</span
+    >
+  {/if}
+{/snippet}
+
+<!--
+  A flat model row: the RECOMMENDED group and the search results. Both mix
+  providers in one list, so each row carries its provider's badge — the same
+  ".brand-badge" the brand headers use. Nested child rows deliberately omit it:
+  they already sit under their brand's header.
+-->
+{#snippet modelRow(provider: ProviderInfo, model: ModelInfo)}
+  {@const selected = isModelSelected(model)}
+  <button
+    class="model-row"
+    class:model-row--selected={selected}
+    type="button"
+    onclick={() => selectModel(provider, model)}
+    title={model.comment || `${provider.name} · ${model.name}`}
+  >
+    {@render brandBadge(provider)}
+    <span class="model-row__name">{model.name}</span>
+    {#if selected}
+      {@render checkMark("model-row__check")}
+    {/if}
+  </button>
+{/snippet}
+
+<!-- A model nested under its brand row. `latest` = first in registry order. -->
+{#snippet modelChildRow(
+  provider: ProviderInfo,
+  model: ModelInfo,
+  latest: boolean,
+)}
+  {@const selected = isModelSelected(model)}
+  <button
+    class="model-row model-row--child"
+    class:model-row--selected={selected}
+    type="button"
+    onclick={() => selectModel(provider, model)}
+    title={model.comment || model.name}
+  >
+    <span class="model-row__name">{model.name}</span>
+    {#if latest}
+      <span class="model-tag">{$_("chat.messageInput.latestTag")}</span>
+    {/if}
+    {#if selected}
+      {@render checkMark("model-row__check")}
+    {/if}
+  </button>
+{/snippet}
 
 <!-- Hidden file input: no accept so mobile can reach Photo Library and Browse -->
 <input
@@ -729,59 +1077,352 @@ SPDX-License-Identifier: Apache-2.0
     </div>
   {/if}
 
-  <!-- File Attachments Display -->
-  {#if attachedFiles.length > 0}
-    <div class="file-attachments">
-      {#each attachedFiles as file, index}
-        <div
-          class="file-pill"
-          class:file-pill-image={isImageFile(file)}
-          class:file-pill-uploading={uploadingFiles.has(file.name)}
-          class:file-pill-failed={failedUploads.has(file.name)}
+  <!-- Composer stack: in image mode a banner sits flush on top of the card and
+       the two share one rounded outline (design: .composer-wrap /
+       .image-mode-banner). Banner visibility is derived from the model that is
+       really selected, so the composer can never advertise a mode the request
+       will not use. -->
+  <div class="composer-wrap">
+    {#if imageModelSelected}
+      <div class="image-mode-banner">
+        <span class="image-mode-banner__left">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+          >
+            <path
+              d="M12 2l1.9 5.6L19.5 9.5 13.9 11.4 12 17l-1.9-5.6L4.5 9.5l5.6-1.9L12 2z"
+            ></path>
+          </svg>
+          {$_("chat.messageInput.imageModeBanner")}
+        </span>
+        <button
+          class="image-mode-banner__close"
+          type="button"
+          onclick={exitImageMode}
+          aria-label={$_("chat.messageInput.exitImageMode")}
+          title={$_("chat.messageInput.exitImageMode")}
         >
-          {#if isImageFile(file)}
-            <button
-              class="thumbnail-button"
-              onclick={() => openImagePreview(file)}
-              aria-label={$_("chat.messageInput.previewImage", {
-                values: { name: file.name },
-              })}
-            >
-              {#if imageThumbnails[file.name]}
-                <img
-                  src={imageThumbnails[file.name]}
-                  alt={file.name}
-                  class="file-thumbnail"
-                />
-              {:else}
-                <div class="thumbnail-placeholder">
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.5"
+            aria-hidden="true"
+          >
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+    {/if}
+
+    <!-- Main Input Container -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div
+      class="input-container-main"
+      class:input-container-main--image-mode={imageModelSelected}
+      onclick={(e) => {
+        if (
+          e.target === e.currentTarget ||
+          ((e.target as HTMLElement).closest(".input-container-main") &&
+            !(e.target as HTMLElement).closest("button") &&
+            !(e.target as HTMLElement).closest(".dropdown-panel"))
+        )
+          textarea?.focus();
+      }}
+    >
+      <!--
+        Pending attachments live INSIDE the composer card, above the textarea,
+        so the preview sits within the card's rounded outline (design: the
+        ".composer" column) instead of floating above it. The card's own 32px
+        column gap is meant for card-to-toolbar, so the attachments and the
+        textarea share a tighter sub-stack.
+      -->
+      <div class="composer__stack">
+        <!--
+        Pending attachments, drawn with the same cards the transcript uses
+        (chat-empty-state.html ".attachment-grid": a 130x100 tile for an image,
+        a 220x60 card for anything else) so the preview before sending matches
+        the turn after it. The composer adds what a transcript has no need for:
+        a remove control and per-file upload status.
+      -->
+        {#if attachedFiles.length > 0}
+          <div class="pending-attachments">
+            {#each attachedFiles as file, index}
+              {@const isUploadingFile = uploadingFiles.has(file.name)}
+              {@const hasFailed = failedUploads.has(file.name)}
+              {@const hasUploaded = uploadedFileResults.has(file.name)}
+              {#if isImageFile(file)}
+                <div
+                  class="pending-attachment pending-attachment--image"
+                  class:pending-attachment--uploading={isUploadingFile}
+                  class:pending-attachment--failed={hasFailed}
+                >
+                  <button
+                    class="pending-attachment__thumb"
+                    onclick={() => openImagePreview(file)}
+                    aria-label={$_("chat.messageInput.previewImage", {
+                      values: { name: file.name },
+                    })}
+                    title={file.name}
                   >
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"
-                    ></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                  </svg>
+                    {#if imageThumbnails[file.name]}
+                      <img
+                        src={imageThumbnails[file.name]}
+                        alt={file.name}
+                        class="pending-attachment__image"
+                      />
+                    {:else}
+                      <span class="pending-attachment__placeholder">
+                        <svg
+                          width="20"
+                          height="20"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.5"
+                          aria-hidden="true"
+                        >
+                          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"
+                          ></rect>
+                          <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                          <polyline points="21 15 16 10 5 21"></polyline>
+                        </svg>
+                      </span>
+                    {/if}
+                  </button>
+
+                  {#if isUploadingFile}
+                    <span class="pending-attachment__badge">
+                      <span class="pending-attachment__spinner"></span>
+                    </span>
+                  {:else if hasFailed}
+                    <span
+                      class="pending-attachment__badge pending-attachment__badge--failed"
+                      title={$_("chat.messageInput.uploadFailed")}>✕</span
+                    >
+                  {:else if hasUploaded}
+                    <span
+                      class="pending-attachment__badge pending-attachment__badge--done"
+                      >✓</span
+                    >
+                  {/if}
+
+                  <button
+                    class="pending-attachment__remove"
+                    onclick={() => removeFile(index)}
+                    aria-label={$_("chat.messageInput.removeFile")}
+                    title={$_("chat.messageInput.removeFile")}
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      aria-hidden="true"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              {:else if isVideoFile(file)}
+                <div
+                  class="pending-attachment pending-attachment--video"
+                  class:pending-attachment--uploading={isUploadingFile}
+                  class:pending-attachment--failed={hasFailed}
+                >
+                  {#if videoPosters[file.name]}
+                    <!-- Poster frame only: muted, metadata-only, never played
+                       inline. Loading the metadata is also what gives us the
+                       real duration below. -->
+                    <!-- svelte-ignore a11y_media_has_caption -->
+                    <video
+                      class="pending-attachment__poster"
+                      src={videoPosters[file.name]}
+                      preload="metadata"
+                      muted
+                      onloadedmetadata={(event) =>
+                        handleVideoMetadata(file.name, event)}
+                    ></video>
+                  {/if}
+
+                  <span class="pending-attachment__play" aria-hidden="true">
+                    <svg
+                      width="10"
+                      height="12"
+                      viewBox="0 0 10 12"
+                      fill="currentColor"
+                    >
+                      <path d="M0 0l10 6-10 6z" />
+                    </svg>
+                  </span>
+
+                  {#if videoDurations[file.name]}
+                    <span class="pending-attachment__duration"
+                      >{videoDurations[file.name]}</span
+                    >
+                  {/if}
+
+                  {#if isUploadingFile}
+                    <span class="pending-attachment__badge">
+                      <span class="pending-attachment__spinner"></span>
+                    </span>
+                  {:else if hasFailed}
+                    <span
+                      class="pending-attachment__badge pending-attachment__badge--failed"
+                      title={$_("chat.messageInput.uploadFailed")}>✕</span
+                    >
+                  {:else if hasUploaded}
+                    <span
+                      class="pending-attachment__badge pending-attachment__badge--done"
+                      >✓</span
+                    >
+                  {/if}
+
+                  <button
+                    class="pending-attachment__remove"
+                    onclick={() => removeFile(index)}
+                    aria-label={$_("chat.messageInput.removeFile")}
+                    title={file.name}
+                  >
+                    <svg
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      aria-hidden="true"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              {:else}
+                <div
+                  class="pending-attachment pending-attachment--file"
+                  class:pending-attachment--uploading={isUploadingFile}
+                  class:pending-attachment--failed={hasFailed}
+                >
+                  <button
+                    class="pending-attachment__open"
+                    onclick={() =>
+                      isTextFile(file) ? openFilePreview(file) : null}
+                    aria-label={isTextFile(file)
+                      ? $_("chat.messageInput.previewFile", {
+                          values: { name: file.name },
+                        })
+                      : $_("chat.messageInput.fileLabel", {
+                          values: { name: file.name },
+                        })}
+                  >
+                    <span class="pending-attachment__icon" aria-hidden="true">
+                      <svg
+                        width="14"
+                        height="17"
+                        viewBox="0 0 14 17"
+                        fill="none"
+                      >
+                        <path
+                          d="M2 1h7l4 4v10a1 1 0 01-1 1H2a1 1 0 01-1-1V2a1 1 0 011-1z"
+                          stroke="currentColor"
+                          stroke-width="1.3"
+                          stroke-linejoin="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="pending-attachment__text">
+                      <span class="pending-attachment__name" title={file.name}
+                        >{file.name}</span
+                      >
+                      <span class="pending-attachment__size">
+                        {#if isUploadingFile}
+                          {$_("chat.messageInput.uploading")}
+                        {:else if hasFailed}
+                          {$_("chat.messageInput.uploadFailed")}
+                        {:else}
+                          {formatFileSize(file.size)}
+                        {/if}
+                      </span>
+                    </span>
+                  </button>
+
+                  {#if isUploadingFile}
+                    <span class="pending-attachment__spinner"></span>
+                  {:else if hasUploaded}
+                    <span class="pending-attachment__check" aria-hidden="true"
+                      >✓</span
+                    >
+                  {/if}
+
+                  <button
+                    class="pending-attachment__remove pending-attachment__remove--inline"
+                    onclick={() => removeFile(index)}
+                    aria-label={$_("chat.messageInput.removeFile")}
+                    title={$_("chat.messageInput.removeFile")}
+                  >
+                    <svg
+                      width="12"
+                      height="12"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2.5"
+                      aria-hidden="true"
+                    >
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
                 </div>
               {/if}
-            </button>
-          {:else}
+            {/each}
+          </div>
+        {/if}
+
+        <!-- Full-area Textarea -->
+        <textarea
+          bind:this={textarea}
+          bind:value={message}
+          oninput={handleInput}
+          onkeydown={handleKeyDown}
+          placeholder={currentPlaceholder}
+          {disabled}
+          rows="1"
+          class="chat-input-textarea"
+          class:recording={isRecording}
+          aria-label={$_("chat.messageInput.messageInput")}
+        ></textarea>
+      </div>
+
+      <!-- Floating Bottom Bar -->
+      <div class="input-bottom-bar">
+        <!-- Left: attach, model, tools, image generation, web search -->
+        <div class="bottom-bar-left">
+          <!-- ===== Attach ===== -->
+          <div class="dropdown-anchor" class:is-open={openMenu === "attach"}>
             <button
-              class="thumbnail-button file-icon-button"
-              onclick={() => (isTextFile(file) ? openFilePreview(file) : null)}
-              aria-label={isTextFile(file)
-                ? $_("chat.messageInput.previewFile", {
-                    values: { name: file.name },
-                  })
-                : $_("chat.messageInput.fileLabel", {
-                    values: { name: file.name },
-                  })}
+              class="attach-btn"
+              type="button"
+              onclick={(e) => {
+                e.stopPropagation();
+                toggleMenu("attach");
+              }}
+              aria-label={$_("chat.messageInput.addContent")}
+              title={$_("chat.messageInput.addContent")}
+              aria-expanded={openMenu === "attach"}
+              {disabled}
             >
               <svg
                 width="16"
@@ -789,202 +1430,93 @@ SPDX-License-Identifier: Apache-2.0
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
-                stroke-width="1.5"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
               >
                 <path
-                  d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"
+                  d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
                 ></path>
-                <polyline points="14,2 14,8 20,8"></polyline>
               </svg>
             </button>
-            <span class="file-name" title={file.name}>{file.name}</span>
-            <span class="file-size">{formatFileSize(file.size)}</span>
-          {/if}
-          {#if uploadingFiles.has(file.name)}
-            <span class="pill-upload-status uploading">
-              <span class="pill-spinner"></span>
-              <span class="pill-status-text"
-                >{$_("chat.messageInput.uploading")}</span
-              >
-            </span>
-          {:else if failedUploads.has(file.name)}
-            <span class="pill-upload-status failed"
-              >✕ {$_("chat.messageInput.uploadFailed")}</span
-            >
-          {:else if uploadedFileResults.has(file.name)}
-            <span class="pill-upload-status success">✓</span>
-          {/if}
-          <button
-            class="pill-remove-btn"
-            onclick={() => removeFile(index)}
-            aria-label={$_("chat.messageInput.removeFile")}
-          >
-            <svg
-              width="10"
-              height="10"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2.5"
-            >
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
-        </div>
-      {/each}
-    </div>
-  {/if}
 
-  <!-- Image-generation hint: shown when an image model is selected. Reuses the
-       standard composer; describes the generate + edit-by-attachment flows. -->
-  {#if imageModelSelected}
-    <div class="image-mode-hint" role="note">
-      <svg
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        aria-hidden="true"
-      >
-        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-        <circle cx="8.5" cy="8.5" r="1.5"></circle>
-        <polyline points="21 15 16 10 5 21"></polyline>
-      </svg>
-      <span>{$_("chat.messageInput.imageModeHint")}</span>
-    </div>
-  {/if}
-
-  <!-- Main Input Container -->
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div
-    class="input-container-main"
-    onclick={(e) => {
-      if (
-        e.target === e.currentTarget ||
-        ((e.target as HTMLElement).closest(".input-container-main") &&
-          !(e.target as HTMLElement).closest("button"))
-      )
-        textarea?.focus();
-    }}
-  >
-    <!-- Full-area Textarea -->
-    <textarea
-      bind:this={textarea}
-      bind:value={message}
-      oninput={handleInput}
-      onkeydown={handleKeyDown}
-      placeholder={currentPlaceholder}
-      {disabled}
-      rows="1"
-      class="chat-input-textarea"
-      class:recording={isRecording}
-      aria-label={$_("chat.messageInput.messageInput")}
-    ></textarea>
-
-    <!-- Floating Bottom Bar -->
-    <div class="input-bottom-bar">
-      <!-- Left: Plus button and Model selector -->
-      <div class="bottom-bar-left">
-        <div class="plus-menu-container">
-          <button
-            class="input-btn plus-btn"
-            onclick={togglePlusMenu}
-            aria-label={$_("chat.messageInput.addContent")}
-            title={$_("chat.messageInput.addContent")}
-            {disabled}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path d="M12 5v14m-7-7h14" />
-            </svg>
-          </button>
-
-          {#if showPlusMenu}
-            <div class="plus-menu">
-              <button class="menu-item" onclick={handleFileSelect}>
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
+            {#if openMenu === "attach"}
+              <div class="dropdown-panel attach-menu">
+                <button
+                  class="menu-row"
+                  type="button"
+                  onclick={handleFileSelect}
                 >
-                  <path
-                    d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
-                  ></path>
-                </svg>
-                <span>{$_("chat.messageInput.addPhotosAndFiles")}</span>
-              </button>
-              <button
-                class="menu-item"
-                onclick={(e) => {
-                  e.stopPropagation();
-                  showPlusMenu = false;
-                  skillPickerOpen = true;
-                }}
-              >
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                >
-                  <path d="M12 2l2.4 5.5L20 8l-4 4 1 6-5-3-5 3 1-6-4-4 5.6-.5z"
-                  ></path>
-                </svg>
-                <span>{$_("chat.skills.label")}</span>
-              </button>
-            </div>
-          {/if}
+                  <span class="menu-row__icon">
+                    <svg
+                      width="18"
+                      height="18"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.8"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path
+                        d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"
+                      ></path>
+                    </svg>
+                  </span>
+                  <span class="menu-row__text">
+                    <span class="menu-row__title"
+                      >{$_("chat.messageInput.addPhotosAndFiles")}</span
+                    >
+                    <span class="menu-row__sub"
+                      >{$_("chat.messageInput.attachHint")}</span
+                    >
+                  </span>
+                </button>
+              </div>
+            {/if}
+          </div>
 
-          <SkillPicker
-            {conversationId}
-            bind:pendingSkillIds
-            bind:open={skillPickerOpen}
-            showTrigger={false}
-          />
-        </div>
-
-        <div class="model-dropdown-container">
-          <button
-            class="selector-btn model-selector-btn"
-            onclick={() => {
-              showModelDropdown = !showModelDropdown;
-              showPlusMenu = false;
-            }}
-            title={$_("chat.messageInput.selectModel")}
-            aria-label={$_("chat.messageInput.selectModel")}
-          >
-            <div class="model-icon">
-              {#if selectedProvider}
-                {@const providerIcon = getIconForTheme(
-                  providers.find((p) => p.key === selectedProvider),
-                )}
-                {@const iconSvg = providerIconSvg(providerIcon)}
-                {@const iconUrl = providerIconUrl(providerIcon)}
-                {#if iconSvg}
-                  <span class="provider-icon-img" aria-hidden="true"
-                    >{@html iconSvg}</span
-                  >
-                {:else if iconUrl}
-                  <img src={iconUrl} alt="" class="provider-icon-img" />
+          <!-- ===== Model ===== -->
+          <div class="dropdown-anchor" class:is-open={openMenu === "model"}>
+            <button
+              class="chip"
+              type="button"
+              onclick={(e) => {
+                e.stopPropagation();
+                toggleMenu("model");
+              }}
+              title={$_("chat.messageInput.selectModel")}
+              aria-label={$_("chat.messageInput.selectModel")}
+              aria-expanded={openMenu === "model"}
+            >
+              <span class="chip__icon">
+                {#if selectedProvider}
+                  {@const providerIcon = getIconForTheme(
+                    providers.find((p) => p.key === selectedProvider),
+                  )}
+                  {@const iconSvg = providerIconSvg(providerIcon)}
+                  {@const iconUrl = providerIconUrl(providerIcon)}
+                  {#if iconSvg}
+                    <span class="provider-icon-img" aria-hidden="true"
+                      >{@html iconSvg}</span
+                    >
+                  {:else if iconUrl}
+                    <img src={iconUrl} alt="" class="provider-icon-img" />
+                  {:else}
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="2"
+                      aria-hidden="true"
+                    >
+                      <circle cx="12" cy="12" r="10" />
+                    </svg>
+                  {/if}
                 {:else}
                   <svg
                     width="14"
@@ -993,415 +1525,523 @@ SPDX-License-Identifier: Apache-2.0
                     fill="none"
                     stroke="currentColor"
                     stroke-width="2"
+                    aria-hidden="true"
                   >
                     <circle cx="12" cy="12" r="10" />
+                    <path d="M12 16v-4" />
+                    <path d="M12 8h.01" />
                   </svg>
                 {/if}
-              {:else}
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <circle cx="12" cy="12" r="10" />
-                  <path d="M12 16v-4" />
-                  <path d="M12 8h.01" />
-                </svg>
-              {/if}
-            </div>
-            <span class="selector-label model-caption"
-              >{selectedModel ||
-                $_("chat.messageInput.selectModelFallback")}</span
-            >
-            {#if imageModelSelected}
-              <svg
-                class="trigger-type-icon"
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                role="img"
-                aria-label={$_("chat.messageInput.imageModel")}
+              </span>
+              <span class="chip__label"
+                >{selectedModel ||
+                  $_("chat.messageInput.selectModelFallback")}</span
               >
-                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                <polyline points="21 15 16 10 5 21"></polyline>
-              </svg>
-            {/if}
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              class="dropdown-arrow"
-              class:open={showModelDropdown}
-            >
-              <polyline points="6 9 12 15 18 9"></polyline>
-            </svg>
-          </button>
-
-          {#snippet modelOption(
-            provider: ProviderInfo,
-            model: ModelInfo,
-            isImage: boolean,
-          )}
-            <button
-              class="menu-item model-option"
-              class:selected={selectedModel === model.key ||
-                selectedModel === model.name}
-              onclick={() => selectModel(provider, model)}
-              title={model.comment || model.name}
-            >
-              <span class="model-name">{model.name}</span>
-              <div class="model-capabilities">
-                {#if isImage}
-                  <!-- Image model: picture icon (replaces the old text badge) -->
-                  <svg
-                    class="capability-icon type-icon type-image active"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    role="img"
-                    aria-label={$_("chat.messageInput.imageModel")}
-                  >
-                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"
-                    ></rect>
-                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                    <polyline points="21 15 16 10 5 21"></polyline>
-                  </svg>
-                {:else}
-                  <!-- Text model: text/type icon -->
-                  <svg
-                    class="capability-icon type-icon type-text active"
-                    width="13"
-                    height="13"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    role="img"
-                    aria-label={$_("chat.messageInput.textModel")}
-                  >
-                    <polyline points="4 7 4 4 20 4 20 7"></polyline>
-                    <line x1="9" y1="20" x2="15" y2="20"></line>
-                    <line x1="12" y1="4" x2="12" y2="20"></line>
-                  </svg>
-                  {#if model.supports_vision}
-                    <svg
-                      class="capability-icon active"
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2"
-                      role="img"
-                      aria-label={$_("chat.messageInput.visionCapable")}
-                    >
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  {/if}
-                {/if}
-              </div>
+              {@render chevron(openMenu === "model")}
             </button>
-          {/snippet}
 
-          {#if showModelDropdown}
-            <div class="model-menu">
-              {#if loadingModels}
-                <div class="dropdown-loading">
-                  <div class="loading-spinner"></div>
-                  <span>{$_("chat.messageInput.loadingModels")}</span>
+            {#if openMenu === "model"}
+              <div class="dropdown-panel model-picker">
+                <div class="model-search">
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    aria-hidden="true"
+                  >
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M21 21l-4.3-4.3" />
+                  </svg>
+                  <input
+                    class="model-search__input"
+                    type="text"
+                    bind:value={modelQuery}
+                    placeholder={$_("chat.messageInput.searchModels")}
+                    aria-label={$_("chat.messageInput.searchModels")}
+                    autocomplete="off"
+                    onclick={(e) => e.stopPropagation()}
+                  />
                 </div>
-              {:else if modelsError}
-                <div class="dropdown-error">{modelsError}</div>
-              {:else}
-                {#each providers as provider}
-                  {@const grouped = splitModels(provider.models)}
-                  {#if grouped.text.length > 0 || grouped.image.length > 0}
-                    {@const providerIcon = getIconForTheme(provider)}
-                    {@const iconSvg = providerIconSvg(providerIcon)}
-                    {@const iconUrl = providerIconUrl(providerIcon)}
-                    <div class="provider-section">
-                      <div class="provider-header">
-                        <div class="provider-icon">
-                          {#if iconSvg}
-                            <span class="provider-icon-img" aria-hidden="true"
-                              >{@html iconSvg}</span
-                            >
-                          {:else if iconUrl}
-                            <img
-                              src={iconUrl}
-                              alt=""
-                              class="provider-icon-img"
-                            />
-                          {/if}
-                        </div>
-                        <span class="provider-name">{provider.name}</span>
-                      </div>
-                      <div class="provider-models">
-                        {#each grouped.text as model}
-                          {@render modelOption(provider, model, false)}
-                        {/each}
-                        {#if grouped.image.length > 0}
-                          <div class="model-subgroup-label" role="presentation">
-                            <svg
-                              width="11"
-                              height="11"
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              stroke-width="2"
-                              aria-hidden="true"
-                            >
-                              <rect
-                                x="3"
-                                y="3"
-                                width="18"
-                                height="18"
-                                rx="2"
-                                ry="2"
-                              ></rect>
-                              <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                              <polyline points="21 15 16 10 5 21"></polyline>
-                            </svg>
-                            <span
-                              >{$_("chat.messageInput.imageModelsGroup")}</span
-                            >
-                          </div>
-                          {#each grouped.image as model}
-                            {@render modelOption(provider, model, true)}
-                          {/each}
-                        {/if}
-                      </div>
-                    </div>
-                  {/if}
-                {/each}
-              {/if}
-            </div>
-          {/if}
-        </div>
 
-        <div class="connectors-row">
-          <div class="connectors-dropdown-container">
-            <button
-              class="connectors-trigger connectors-selector-btn"
-              onclick={() => {
-                showConnectorsDropdown = !showConnectorsDropdown;
-              }}
-              title={$_("chat.messageInput.selectConnectors")}
-              aria-label={$_("chat.messageInput.selectConnectors")}
-            >
-              <div class="connectors-icon">
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                >
-                  <path
-                    d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
-                  ></path>
-                </svg>
-              </div>
-              <span class="connectors-label">{connectorsLabel}</span>
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                class="dropdown-arrow"
-                class:open={showConnectorsDropdown}
-              >
-                <polyline points="6 9 12 15 18 9"></polyline>
-              </svg>
-            </button>
-
-            {#if showConnectorsDropdown}
-              <div class="connectors-menu">
-                {#if loadingMcpServers}
+                {#if loadingModels}
                   <div class="dropdown-loading">
                     <div class="loading-spinner"></div>
-                    <span>{$_("chat.messageInput.loadingConnectors")}</span>
+                    <span>{$_("chat.messageInput.loadingModels")}</span>
                   </div>
-                {:else if mcpServersError}
-                  <div class="dropdown-error">{mcpServersError}</div>
-                {:else if mcpServers.length === 0}
+                {:else if modelsError}
+                  <div class="dropdown-error">{modelsError}</div>
+                {:else if textBrands.length === 0}
                   <div class="dropdown-empty">
-                    {$_("chat.messageInput.noConnectors")}
+                    {$_("chat.messageInput.noModels")}
+                  </div>
+                {:else if modelQueryTerm}
+                  <div class="model-group">
+                    <span class="model-group__label"
+                      >{$_("chat.messageInput.resultsGroup")}</span
+                    >
+                    {#if modelSearchResults.length === 0}
+                      <span class="cx-state"
+                        >{$_("chat.messageInput.noModelMatches")}</span
+                      >
+                    {:else}
+                      {#each modelSearchResults as entry (entry.provider.key + "/" + entry.model.key)}
+                        {@render modelRow(entry.provider, entry.model)}
+                      {/each}
+                    {/if}
                   </div>
                 {:else}
-                  <div class="connectors-list">
-                    {#each mcpServers as server (server.id)}
-                      <div
-                        class="connectors-row-item"
-                        class:selected={selectedMcpServers.includes(server.id)}
+                  {#if recommendedModels.length > 0}
+                    <div class="model-group">
+                      <span class="model-group__label"
+                        >{$_("chat.messageInput.recommendedGroup")}</span
                       >
-                        <div class="connectors-info">
-                          <span class="connectors-name">{server.name}</span>
-                        </div>
-                        <button
-                          type="button"
-                          class="connectors-switch"
-                          class:active={selectedMcpServers.includes(server.id)}
-                          onclick={() => onMcpToggle?.(server.id)}
-                          aria-label={selectedMcpServers.includes(server.id)
-                            ? $_("admin.mcpServers.enabled")
-                            : $_("admin.mcpServers.disabled")}
+                      {#each recommendedModels as entry (entry.provider.key + "/" + entry.model.key)}
+                        {@render modelRow(entry.provider, entry.model)}
+                      {/each}
+                    </div>
+                  {/if}
+
+                  <div class="model-group">
+                    {#each textBrands as brand (brand.provider.key)}
+                      {@const brandOpen = expandedBrands.has(
+                        brand.provider.key,
+                      )}
+                      <button
+                        class="model-brand-row"
+                        type="button"
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          toggleBrand(brand.provider.key);
+                        }}
+                        aria-expanded={brandOpen}
+                      >
+                        <svg
+                          class="chev-toggle"
+                          class:chev-toggle--collapsed={!brandOpen}
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="2"
+                          aria-hidden="true"
                         >
-                          <span class="switch-thumb"></span>
-                        </button>
-                      </div>
+                          <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                        {@render brandBadge(brand.provider)}
+                        <span class="model-brand-row__name"
+                          >{brand.provider.name}</span
+                        >
+                        <span class="model-brand-row__count"
+                          >{$_("chat.messageInput.modelCount", {
+                            values: { count: brand.models.length },
+                          })}</span
+                        >
+                      </button>
+
+                      {#if brandOpen}
+                        <div class="model-brand-children">
+                          {#each visibleBrandModels(brand) as model, index (model.key)}
+                            {@render modelChildRow(
+                              brand.provider,
+                              model,
+                              index === 0,
+                            )}
+                          {/each}
+                          {#if hiddenBrandCount(brand) > 0}
+                            <button
+                              class="model-legacy-link"
+                              type="button"
+                              onclick={(e) => {
+                                e.stopPropagation();
+                                revealLegacy(brand.provider.key);
+                              }}
+                            >
+                              {$_("chat.messageInput.showLegacyModels", {
+                                values: { count: hiddenBrandCount(brand) },
+                              })}
+                            </button>
+                          {/if}
+                        </div>
+                      {/if}
                     {/each}
                   </div>
                 {/if}
               </div>
             {/if}
           </div>
-        </div>
 
-        <button
-          class="toggle-btn"
-          class:active={webSearchEnabled}
-          onclick={onWebSearchToggle}
-          title={webSearchEnabled
-            ? $_("chat.messageInput.disableWebSearch")
-            : $_("chat.messageInput.enableWebSearch")}
-          aria-label={webSearchEnabled
-            ? $_("chat.messageInput.disableWebSearch")
-            : $_("chat.messageInput.enableWebSearch")}
-          aria-pressed={webSearchEnabled}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
+          <!-- ===== Tools: skills + connectors ===== -->
+          <div class="dropdown-anchor" class:is-open={openMenu === "tools"}>
+            <button
+              class="chip"
+              type="button"
+              onclick={(e) => {
+                e.stopPropagation();
+                toggleMenu("tools");
+              }}
+              title={$_("chat.messageInput.selectConnectors")}
+              aria-label={$_("chat.messageInput.selectConnectors")}
+              aria-expanded={openMenu === "tools"}
+            >
+              <span class="chip__icon">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <path
+                    d="M4.07475 1.72803C3.62687 2.03832 3.26098 2.45266 3.00847 2.93547C2.75595 3.41829 2.62437 3.95517 2.625 4.50003C2.625 5.69853 3.249 6.75153 4.1925 7.35153C4.581 7.59753 4.88925 8.04378 4.869 8.58153V8.58753L4.746 11.0903C4.74365 11.1649 4.72646 11.2384 4.69543 11.3063C4.6644 11.3742 4.62015 11.4353 4.56527 11.4859C4.51038 11.5366 4.44596 11.5758 4.37577 11.6013C4.30557 11.6268 4.23099 11.638 4.1564 11.6344C4.0818 11.6308 4.00868 11.6123 3.94129 11.5801C3.8739 11.5479 3.8136 11.5026 3.7639 11.4469C3.71421 11.3911 3.67611 11.3261 3.65183 11.2554C3.62755 11.1848 3.61758 11.1101 3.6225 11.0355L3.74475 8.53803C3.74625 8.47428 3.70725 8.37603 3.5895 8.30103C2.94917 7.89483 2.42187 7.33341 2.05657 6.66889C1.69127 6.00438 1.49982 5.25833 1.5 4.50003C1.5001 3.7754 1.67519 3.06151 2.01038 2.41907C2.34558 1.77663 2.83096 1.22464 3.42525 0.81003C3.60694 0.679001 3.82403 0.606013 4.04798 0.600659C4.27192 0.595305 4.49225 0.657834 4.68 0.78003C5.0265 1.00203 5.25 1.40028 5.25 1.84728V3.96228C5.25 4.02378 5.28075 4.08228 5.3325 4.11678L5.895 4.49928C5.92601 4.52024 5.96257 4.53144 6 4.53144C6.03743 4.53144 6.07399 4.52024 6.105 4.49928L6.6675 4.11678C6.69289 4.09962 6.71369 4.07649 6.72807 4.04942C6.74246 4.02236 6.74998 3.99218 6.75 3.96153V1.84728C6.75 1.40028 6.9735 1.00203 7.32 0.78003C7.50775 0.657834 7.72808 0.595305 7.95202 0.600659C8.17597 0.606013 8.39306 0.679001 8.57475 0.81003C9.16904 1.22464 9.65442 1.77663 9.98962 2.41907C10.3248 3.06151 10.4999 3.7754 10.5 4.50003C10.5002 5.25833 10.3087 6.00438 9.94343 6.66889C9.57813 7.33341 9.05083 7.89483 8.4105 8.30103C8.29275 8.37603 8.25375 8.47353 8.25525 8.53728L8.3775 11.0348C8.38345 11.1341 8.36302 11.2332 8.31828 11.3221C8.27354 11.411 8.20608 11.4864 8.12276 11.5408C8.03944 11.5952 7.94321 11.6266 7.84385 11.6317C7.74449 11.6369 7.64552 11.6157 7.557 11.5703C7.46847 11.5243 7.39376 11.4556 7.34051 11.3713C7.28727 11.287 7.25741 11.19 7.254 11.0903L7.131 8.58153C7.11075 8.04378 7.419 7.59753 7.8075 7.35153C8.28793 7.04686 8.68354 6.62569 8.95759 6.12716C9.23164 5.62863 9.37522 5.06892 9.375 4.50003C9.37563 3.95517 9.24405 3.41829 8.99154 2.93547C8.73902 2.45266 8.37313 2.03832 7.92525 1.72803C7.90725 1.74078 7.875 1.77828 7.875 1.84803V3.96153C7.87502 4.17575 7.82261 4.38672 7.72233 4.57602C7.62206 4.76532 7.47698 4.9272 7.29975 5.04753L6.73725 5.43003C6.51974 5.5777 6.2629 5.65666 6 5.65666C5.7371 5.65666 5.48026 5.5777 5.26275 5.43003L4.70025 5.04753C4.52302 4.9272 4.37794 4.76532 4.27767 4.57602C4.17739 4.38672 4.12498 4.17575 4.125 3.96153V1.84728C4.125 1.77828 4.09275 1.74078 4.07475 1.72803Z"
+                    fill="currentColor"
+                  ></path>
+                </svg>
+              </span>
+              <span class="chip__label">{connectorsLabel}</span>
+              {@render chevron(openMenu === "tools")}
+              {#if toolsBadgeCount > 0}
+                <span class="tools-badge">{toolsBadgeCount}</span>
+              {/if}
+            </button>
+
+            <!-- Always mounted, hidden with display (the design's own mechanism):
+               SkillPicker owns the skill catalog and the linked-skill count that
+               badges this chip, so unmounting it on close would blank the badge. -->
+            <div
+              class="dropdown-panel tools-menu"
+              class:dropdown-panel--hidden={openMenu !== "tools"}
+            >
+              <div class="tools-menu__head">
+                <span class="tools-menu__title"
+                  >{$_("chat.messageInput.tools")}</span
+                >
+                <span class="tools-menu__sub"
+                  >{$_("chat.messageInput.toolsSubtitle")}</span
+                >
+              </div>
+
+              <div class="tools-skills-box">
+                <span class="tools-section-label"
+                  >{$_("chat.skills.label")}</span
+                >
+                <SkillPicker
+                  {conversationId}
+                  bind:pendingSkillIds
+                  bind:selectedCount={activeSkillCount}
+                />
+              </div>
+
+              <!-- The design gives each section its own footer link
+                   (".tools-menu__footer"): skills here, connectors at the end. -->
+              <button
+                class="tools-menu__footer"
+                type="button"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  closeMenus();
+                  navigate("/settings?tab=skills");
+                }}
+              >
+                {$_("chat.messageInput.manageSkills")}
+              </button>
+
+              <div class="tools-connectors">
+                <span class="tools-section-label"
+                  >{$_("chat.messageInput.connectorsSection")}</span
+                >
+                {#if loadingMcpServers}
+                  <span class="cx-state"
+                    >{$_("chat.messageInput.loadingConnectors")}</span
+                  >
+                {:else if mcpServersError}
+                  <span class="cx-state cx-state--error">{mcpServersError}</span
+                  >
+                {:else if mcpServers.length === 0}
+                  <span class="cx-state"
+                    >{$_("chat.messageInput.noConnectors")}</span
+                  >
+                {:else}
+                  {#each mcpServers as server (server.id)}
+                    {@const on = selectedMcpServers.includes(server.id)}
+                    {@const connected = isConnectorConnected(server)}
+                    <div class="connector-row">
+                      <span class="connector-icon">
+                        <svg
+                          width="16"
+                          height="16"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          stroke-width="1.8"
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          aria-hidden="true"
+                        >
+                          <path d="M9 2v6" />
+                          <path d="M15 2v6" />
+                          <path d="M6 8h12v3a6 6 0 0 1-12 0V8z" />
+                          <path d="M12 17v5" />
+                        </svg>
+                      </span>
+                      <span class="connector-text">
+                        <span class="connector-name" title={server.name}
+                          >{server.name}</span
+                        >
+                        <span
+                          class="connector-status"
+                          class:connector-status--on={connected}
+                          class:connector-status--off={!connected}
+                        >
+                          {connected
+                            ? $_("chat.messageInput.connectorConnected")
+                            : $_("chat.messageInput.connectorDisconnected")}
+                        </span>
+                      </span>
+                      <button
+                        type="button"
+                        class="toggle"
+                        class:toggle--on={on}
+                        aria-pressed={on}
+                        aria-label={server.name}
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          onMcpToggle?.(server.id);
+                        }}
+                      ></button>
+                    </div>
+                  {/each}
+                {/if}
+              </div>
+
+              <button
+                class="tools-menu__footer"
+                type="button"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  closeMenus();
+                  navigate("/settings?tab=integrations");
+                }}
+              >
+                {$_("chat.messageInput.manageConnectors")}
+              </button>
+            </div>
+          </div>
+
+          <!-- ===== Image generation ===== -->
+          {#if imageEntries.length > 0}
+            <div class="dropdown-anchor" class:is-open={openMenu === "image"}>
+              <button
+                class="image-pill"
+                class:image-pill--locked={imageModelSelected}
+                type="button"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleMenu("image");
+                }}
+                title={$_("chat.messageInput.imageModel")}
+                aria-label={$_("chat.messageInput.imageModel")}
+                aria-expanded={openMenu === "image"}
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <path
+                    d="M18.3336 1.8348V5.50132M20.1671 3.66806H16.5002M10.0985 2.58134C10.1378 2.37107 10.2494 2.18115 10.414 2.04449C10.5785 1.90782 10.7857 1.83301 10.9997 1.83301C11.2136 1.83301 11.4208 1.90782 11.5854 2.04449C11.75 2.18115 11.8616 2.37107 11.9008 2.58134L12.8643 7.67597C12.9328 8.03818 13.1088 8.37134 13.3695 8.63199C13.6302 8.89264 13.9634 9.06866 14.3256 9.13708L19.4209 10.1005C19.6312 10.1397 19.8211 10.2513 19.9578 10.4159C20.0945 10.5804 20.1693 10.7876 20.1693 11.0015C20.1693 11.2154 20.0945 11.4226 19.9578 11.5871C19.8211 11.7517 19.6312 11.8633 19.4209 11.9026L14.3256 12.8659C13.9634 12.9344 13.6302 13.1104 13.3695 13.371C13.1088 13.6317 12.9328 13.9648 12.8643 14.327L11.9008 19.4217C11.8616 19.6319 11.75 19.8219 11.5854 19.9585C11.4208 20.0952 11.2136 20.17 10.9997 20.17C10.7857 20.17 10.5785 20.0952 10.414 19.9585C10.2494 19.8219 10.1378 19.6319 10.0985 19.4217L9.13503 14.327C9.0666 13.9648 8.89056 13.6317 8.62988 13.371C8.3692 13.1104 8.03599 12.9344 7.67374 12.8659L2.5785 11.9026C2.3682 11.8633 2.17827 11.7517 2.04158 11.5871C1.9049 11.4226 1.83008 11.2154 1.83008 11.0015C1.83008 10.7876 1.9049 10.5804 2.04158 10.4159C2.17827 10.2513 2.3682 10.1397 2.5785 10.1005L7.67374 9.13708C8.03599 9.06866 8.3692 8.89264 8.62988 8.63199C8.89056 8.37134 9.0666 8.03818 9.13503 7.67597L10.0985 2.58134ZM5.49928 18.3341C5.49928 19.3466 4.6784 20.1674 3.6658 20.1674C2.65319 20.1674 1.83232 19.3466 1.83232 18.3341C1.83232 17.3217 2.65319 16.5009 3.6658 16.5009C4.6784 16.5009 5.49928 17.3217 5.49928 18.3341Z"
+                    stroke="#427AC6"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
+                </svg>
+                <span class="image-pill__label"
+                  >{$_("chat.messageInput.imageChip")}</span
+                >
+                {@render chevron(openMenu === "image")}
+              </button>
+
+              {#if openMenu === "image"}
+                <div class="dropdown-panel image-model-picker">
+                  <div class="image-model-head">
+                    <span class="image-model-head__icon">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="22"
+                        height="22"
+                        viewBox="0 0 22 22"
+                        fill="none"
+                      >
+                        <path
+                          d="M18.3336 1.8348V5.50132M20.1671 3.66806H16.5002M10.0985 2.58134C10.1378 2.37107 10.2494 2.18115 10.414 2.04449C10.5785 1.90782 10.7857 1.83301 10.9997 1.83301C11.2136 1.83301 11.4208 1.90782 11.5854 2.04449C11.75 2.18115 11.8616 2.37107 11.9008 2.58134L12.8643 7.67597C12.9328 8.03818 13.1088 8.37134 13.3695 8.63199C13.6302 8.89264 13.9634 9.06866 14.3256 9.13708L19.4209 10.1005C19.6312 10.1397 19.8211 10.2513 19.9578 10.4159C20.0945 10.5804 20.1693 10.7876 20.1693 11.0015C20.1693 11.2154 20.0945 11.4226 19.9578 11.5871C19.8211 11.7517 19.6312 11.8633 19.4209 11.9026L14.3256 12.8659C13.9634 12.9344 13.6302 13.1104 13.3695 13.371C13.1088 13.6317 12.9328 13.9648 12.8643 14.327L11.9008 19.4217C11.8616 19.6319 11.75 19.8219 11.5854 19.9585C11.4208 20.0952 11.2136 20.17 10.9997 20.17C10.7857 20.17 10.5785 20.0952 10.414 19.9585C10.2494 19.8219 10.1378 19.6319 10.0985 19.4217L9.13503 14.327C9.0666 13.9648 8.89056 13.6317 8.62988 13.371C8.3692 13.1104 8.03599 12.9344 7.67374 12.8659L2.5785 11.9026C2.3682 11.8633 2.17827 11.7517 2.04158 11.5871C1.9049 11.4226 1.83008 11.2154 1.83008 11.0015C1.83008 10.7876 1.9049 10.5804 2.04158 10.4159C2.17827 10.2513 2.3682 10.1397 2.5785 10.1005L7.67374 9.13708C8.03599 9.06866 8.3692 8.89264 8.62988 8.63199C8.89056 8.37134 9.0666 8.03818 9.13503 7.67597L10.0985 2.58134ZM5.49928 18.3341C5.49928 19.3466 4.6784 20.1674 3.6658 20.1674C2.65319 20.1674 1.83232 19.3466 1.83232 18.3341C1.83232 17.3217 2.65319 16.5009 3.6658 16.5009C4.6784 16.5009 5.49928 17.3217 5.49928 18.3341Z"
+                          stroke="#427AC6"
+                          stroke-width="2"
+                          stroke-linecap="round"
+                        />
+                      </svg>
+                    </span>
+                    <span class="image-model-head__text">
+                      <span class="image-model-head__title"
+                        >{$_("chat.messageInput.imageGenTitle")}</span
+                      >
+                      <span class="image-model-head__sub"
+                        >{$_("chat.messageInput.imageGenSubtitle")}</span
+                      >
+                    </span>
+                  </div>
+
+                  {#each imageEntries as entry (entry.provider.key + "/" + entry.model.key)}
+                    {@const selected = isModelSelected(entry.model)}
+                    <button
+                      class="image-model-row"
+                      class:image-model-row--selected={selected}
+                      type="button"
+                      onclick={() => selectModel(entry.provider, entry.model)}
+                    >
+                      <span class="image-model-row__text">
+                        <span class="image-model-row__name"
+                          >{entry.model.name}</span
+                        >
+                      </span>
+                      {#if selected}
+                        {@render checkMark("image-model-row__check")}
+                      {/if}
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- ===== Web search ===== -->
+          <button
+            class="circle-btn"
+            class:circle-btn--active={webSearchEnabled}
+            type="button"
+            onclick={onWebSearchToggle}
+            title={webSearchEnabled
+              ? $_("chat.messageInput.disableWebSearch")
+              : $_("chat.messageInput.enableWebSearch")}
+            aria-label={webSearchEnabled
+              ? $_("chat.messageInput.disableWebSearch")
+              : $_("chat.messageInput.enableWebSearch")}
+            aria-pressed={webSearchEnabled}
           >
-            <circle cx="12" cy="12" r="10" />
-            <path d="M2 12h20" />
-            <path
-              d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
-            />
-          </svg>
-          {#if webSearchEnabled}
-            <span class="toggle-label">{$_("chat.messageInput.search")}</span>
-          {/if}
-        </button>
-      </div>
-
-      <!-- Center: Spacer -->
-      <div class="bottom-bar-center"></div>
-
-      <!-- Right: Mic and Send -->
-      <div class="bottom-bar-right">
-        <button
-          class="input-btn mic-btn"
-          class:recording={isRecording}
-          onclick={toggleVoiceInput}
-          aria-label={isRecording
-            ? $_("chat.messageInput.stopRecording")
-            : $_("chat.messageInput.voiceInput")}
-          title={isRecording
-            ? $_("chat.messageInput.stopRecording")
-            : $_("chat.messageInput.voiceInput")}
-          {disabled}
-        >
-          {#if isRecording}
-            <!-- Filled circle during recording -->
             <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-              stroke="none"
-            >
-              <circle cx="12" cy="12" r="8" />
-            </svg>
-          {:else}
-            <!-- Microphone icon when idle -->
-            <svg
-              width="16"
-              height="16"
+              width="15"
+              height="15"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
               stroke-width="2"
+              aria-hidden="true"
             >
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-              <path d="M12 19v4" />
-              <path d="M8 23h8" />
-            </svg>
-          {/if}
-        </button>
-
-        <button
-          class="input-btn send-btn"
-          onclick={handleSend}
-          disabled={disabled ||
-            isUploading ||
-            (!message.trim() && attachedFiles.length === 0)}
-          aria-label={isUploading
-            ? $_("chat.messageInput.uploading")
-            : $_("chat.messageInput.sendMessage")}
-          title={isUploading
-            ? $_("chat.messageInput.uploading")
-            : $_("chat.messageInput.sendMessageTitle")}
-        >
-          {#if disabled || isUploading}
-            <svg
-              class="spinner"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <circle cx="12" cy="12" r="10" opacity="0.25"></circle>
-              <path d="M12 2a10 10 0 0 1 10 10" opacity="0.75"></path>
-            </svg>
-          {:else}
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="11"
-              height="11"
-              viewBox="0 0 11 11"
-              fill="none"
-            >
+              <circle cx="12" cy="12" r="10" />
+              <path d="M2 12h20" />
               <path
-                d="M5.08368 9.1676L9.16748 5.0838L5.08368 1M9.16748 5.0838L0.999879 5.0838"
-                stroke="white"
-                stroke-width="2"
-                stroke-linecap="round"
+                d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"
               />
             </svg>
-          {/if}
-        </button>
+          </button>
+        </div>
+
+        <!-- Center: Spacer -->
+        <div class="bottom-bar-center"></div>
+
+        <!-- Right: Mic and Send -->
+        <div class="bottom-bar-right">
+          <button
+            class="input-btn mic-btn"
+            class:recording={isRecording}
+            onclick={toggleVoiceInput}
+            aria-label={isRecording
+              ? $_("chat.messageInput.stopRecording")
+              : $_("chat.messageInput.voiceInput")}
+            title={isRecording
+              ? $_("chat.messageInput.stopRecording")
+              : $_("chat.messageInput.voiceInput")}
+            {disabled}
+          >
+            {#if isRecording}
+              <!-- Filled circle during recording -->
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+                stroke="none"
+              >
+                <circle cx="12" cy="12" r="8" />
+              </svg>
+            {:else}
+              <!-- Microphone icon when idle -->
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"
+                />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <path d="M12 19v4" />
+                <path d="M8 23h8" />
+              </svg>
+            {/if}
+          </button>
+
+          <button
+            class="input-btn send-btn"
+            onclick={handleSend}
+            disabled={disabled ||
+              isUploading ||
+              (!message.trim() && attachedFiles.length === 0)}
+            aria-label={isUploading
+              ? $_("chat.messageInput.uploading")
+              : $_("chat.messageInput.sendMessage")}
+            title={isUploading
+              ? $_("chat.messageInput.uploading")
+              : $_("chat.messageInput.sendMessageTitle")}
+          >
+            {#if disabled || isUploading}
+              <svg
+                class="spinner"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <circle cx="12" cy="12" r="10" opacity="0.25"></circle>
+                <path d="M12 2a10 10 0 0 1 10 10" opacity="0.75"></path>
+              </svg>
+            {:else}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 14 14"
+                fill="none"
+              >
+                <path
+                  d="M11.0836 7L6.99982 2.9162L2.91602 7M6.99982 2.9162V11.0838"
+                  stroke="white"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                />
+              </svg>
+            {/if}
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -1655,6 +2295,15 @@ SPDX-License-Identifier: Apache-2.0
     cursor: text;
   }
 
+  /* Attachments + textarea share a tighter column; the card's own 32px gap
+     stays where the design puts it, between this stack and the toolbar. */
+  .composer__stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+
   .input-container-main:focus-within {
     box-shadow:
       inset 0 0 0 1px var(--gx-hair-strong),
@@ -1754,9 +2403,16 @@ SPDX-License-Identifier: Apache-2.0
     height: 15px;
   }
 
-  /* the attach button is the only outlined circle in the design */
+  /* the attach button is the only filled circle in the design: 34px,
+     rgb(249,250,251) fill, a hairline ring and a darker icon than the rest
+     of the toolbar (--gx-slate-600, not --gx-slate-500). */
   .input-btn.plus-btn {
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    background: var(--gx-an-field-bg);
     box-shadow: inset 0 0 0 1px var(--gx-hair-strong);
+    color: var(--gx-slate-600);
   }
 
   .input-btn:hover:not(:disabled) {
@@ -1767,6 +2423,8 @@ SPDX-License-Identifier: Apache-2.0
   }
 
   .input-btn.plus-btn:hover:not(:disabled) {
+    background: var(--gx-hover-soft);
+    color: var(--gx-slate-600);
     box-shadow: inset 0 0 0 1px var(--gx-hair-strong);
   }
 
@@ -1863,528 +2521,890 @@ SPDX-License-Identifier: Apache-2.0
     opacity: 0.8;
   }
 
-  /* ===== Selector Button (Dropdowns) ===== */
-  /* Figma chip: 26px pill, hairline ring, 5/8/5/10 padding */
-  .selector-btn {
+  /* =====================================================================
+     Composer chips + dropdown pickers
+     Transcribed from chat-empty-state.html (figma chat/empty-state 159:15193):
+     .attach-btn / .chip / .image-pill / .circle-btn and the four
+     .dropdown-panel pickers. Values live on the --gx-cx-* token layer in
+     app.css so the dark theme remaps in one place.
+
+     Two global rules from app.css fight this design and are reset per element:
+       - `button, .btn` sets padding + justify-content: center
+       - `button, .btn` sets backdrop-filter: blur(.625rem), which repaints the
+         area behind the button and erases hairlines underneath it
+     ===================================================================== */
+
+  .dropdown-anchor {
+    position: relative;
     display: flex;
     align-items: center;
-    height: 26px;
-    gap: 5px;
-    padding: 5px 8px 5px 10px;
-    border: none;
-    border-radius: 100px;
-    background: transparent;
-    color: var(--gx-slate-700);
-    font-family: var(--gx-font-display);
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    cursor: pointer;
-    transition: background-color 120ms ease;
-    white-space: nowrap;
-    box-shadow: inset 0 0 0 1px var(--gx-hair-strong);
   }
 
-  .selector-btn:hover:not(:disabled) {
-    background: var(--gx-hover-soft);
-    color: var(--gx-slate-700);
-    transform: none;
-    box-shadow: inset 0 0 0 1px var(--gx-hair-strong);
+  .dropdown-anchor button {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
   }
 
-  .selector-label {
-    max-width: 8rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  /* ===== Toggle Button (On/Off) ===== */
-  .toggle-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    min-width: 28px;
-    height: 26px;
-    padding: 5px 10px;
-    border: none;
-    border-radius: 100px;
-    background: transparent;
-    color: var(--gx-slate-500);
-    font-family: var(--gx-font-display);
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
-    cursor: pointer;
-    transition: background-color 120ms ease;
-    white-space: nowrap;
-    box-shadow: inset 0 0 0 1px var(--gx-hair-strong);
-  }
-
-  /* off state is the bare 28px circle from the design, not a pill */
-  .toggle-btn:not(.active) {
-    width: 28px;
-    height: 28px;
+  /* ---- attach: the only filled circle in the design (34px) ---- */
+  .attach-btn {
+    width: 34px;
+    height: 34px;
     padding: 0;
-    border-radius: 14px;
-    box-shadow: none;
-  }
-
-  .toggle-btn svg {
-    width: 15px;
-    height: 15px;
-    flex-shrink: 0;
-  }
-
-  .toggle-btn:hover:not(:disabled) {
-    background: var(--gx-hover-soft);
-    color: var(--gx-slate-500);
-    transform: none;
-  }
-
-  .toggle-btn.active {
-    background: var(--gx-teal-soft);
-    color: var(--gx-teal);
-    box-shadow: none;
-  }
-
-  .toggle-label {
-    font-size: 12px;
-    line-height: 16px;
-  }
-
-  .model-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 12px;
-    height: 12px;
-    flex-shrink: 0;
-  }
-
-  .model-icon :global(svg) {
-    width: 12px;
-    height: 12px;
-  }
-
-  .connectors-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 12px;
-    height: 12px;
-    flex-shrink: 0;
-  }
-
-  .connectors-icon :global(svg) {
-    width: 12px;
-    height: 12px;
-  }
-
-  .model-icon .provider-icon-img {
-    width: 16px;
-    height: 16px;
-    object-fit: contain;
-  }
-
-  .dropdown-arrow {
-    color: var(--text-secondary);
-    transition: transform 0.2s ease;
-    flex-shrink: 0;
-  }
-
-  .dropdown-arrow.open {
-    transform: rotate(180deg);
-  }
-
-  /* ===== Plus Menu ===== */
-  .plus-menu-container,
-  .model-dropdown-container,
-  .connectors-dropdown-container {
-    position: relative;
-    display: flex;
-    align-items: center;
-  }
-
-  .plus-menu,
-  .model-menu,
-  .connectors-menu {
-    position: absolute;
-    bottom: calc(100% + var(--space-sm));
-    left: 0;
-    z-index: 100;
-    min-width: 11rem;
-    background: color-mix(
-      in oklab,
-      var(--bg-primary) 85%,
-      var(--btn-secondary)
-    );
-    backdrop-filter: blur(calc(var(--glass-blur) * 1.5)) saturate(1.5);
-    -webkit-backdrop-filter: blur(calc(var(--glass-blur) * 1.5)) saturate(1.5);
-    border: 1px solid var(--glass-stroke-light);
-    border-radius: var(--radius-lg);
-    box-shadow:
-      /* Outer glow for floating effect */
-      0 0 0 1px var(--glass-edge-glow),
-      /* Layered depth shadows */ 0 4px 12px rgba(0, 0, 0, 0.15),
-      0 12px 28px rgba(0, 0, 0, 0.2),
-      0 20px 48px rgba(0, 0, 0, 0.15),
-      /* Inner highlight for glass edge */ var(--glass-highlight),
-      inset 0 0 20px rgba(255, 255, 255, 0.02);
-    padding: var(--space-sm);
-    overflow: hidden;
-  }
-
-  .plus-menu::before,
-  .model-menu::before,
-  .connectors-menu::before {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background:
-      /* Top highlight edge - liquid refraction */
-      linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, transparent 20%),
-      /* Subtle brand tint */
-        linear-gradient(
-          135deg,
-          var(--glass-tint-primary) 0%,
-          transparent 40%,
-          transparent 60%,
-          rgba(var(--brand-rgb), 0.02) 100%
-        );
-    border-radius: inherit;
-    pointer-events: none;
-  }
-
-  .plus-menu::after,
-  .model-menu::after,
-  .connectors-menu::after {
-    content: "";
-    position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent 0%,
-      rgba(255, 255, 255, 0.15) 20%,
-      rgba(255, 255, 255, 0.2) 50%,
-      rgba(255, 255, 255, 0.15) 80%,
-      transparent 100%
-    );
-    border-radius: inherit;
-    pointer-events: none;
-  }
-
-  /* ===== Model Menu ===== */
-  .model-menu,
-  .connectors-menu {
-    min-width: 14rem;
-    max-height: 20rem;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
-  }
-
-  .model-menu::-webkit-scrollbar {
-    width: 6px;
-  }
-
-  .model-menu::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .model-menu::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.12);
-    border-radius: 3px;
-  }
-
-  .model-menu::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
-  }
-
-  .dropdown-empty {
-    padding: var(--space-lg);
-    text-align: center;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-  }
-
-  .provider-section {
-    position: relative;
-  }
-
-  .provider-section:not(:last-child) {
-    border-bottom: 1px solid var(--glass-stroke-dark);
-    margin-bottom: var(--space-xs);
-    padding-bottom: var(--space-xs);
-  }
-
-  .provider-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-md);
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    background: var(--btn-secondary);
-    border-radius: var(--radius-sm);
-    margin-bottom: var(--space-xs);
-  }
-
-  .provider-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    flex-shrink: 0;
-  }
-
-  .provider-icon :global(svg) {
-    width: 12px;
-    height: 12px;
-    opacity: 0.7;
-  }
-
-  .provider-icon-img {
-    width: 16px;
-    height: 16px;
-    object-fit: contain;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .provider-models {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-  }
-
-  .model-option {
-    justify-content: space-between;
-  }
-
-  .connectors-name {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .connectors-row {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    padding: 0;
-  }
-
-  .connectors-trigger {
-    display: inline-flex;
-    align-items: center;
-    height: 26px;
-    gap: 5px;
-    padding: 5px 8px 5px 10px;
     border: none;
-    border-radius: 100px;
-    background: transparent;
-    color: var(--gx-slate-700);
-    font-family: var(--gx-font-display);
-    font-size: 12px;
-    font-weight: 500;
-    line-height: 16px;
+    border-radius: 17px;
+    background: var(--gx-cx-row-hover);
+    box-shadow: inset 0 0 0 1px var(--gx-cx-pill-ring);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gx-slate-600);
+    flex-shrink: 0;
     cursor: pointer;
     transition: background-color 120ms ease;
-    box-shadow: inset 0 0 0 1px var(--gx-hair-strong);
   }
 
-  .connectors-trigger:hover {
+  .attach-btn:hover:not(:disabled) {
     background: var(--gx-hover-soft);
-    color: var(--gx-slate-700);
-    transform: none;
-    box-shadow: inset 0 0 0 1px var(--gx-hair-strong);
   }
 
-  .connectors-label {
-    max-width: 10rem;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .connectors-menu {
-    min-width: 16rem;
-  }
-
-  .connectors-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.35rem;
-  }
-
-  .connectors-row-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-sm);
-    padding: 0.5rem 0.75rem;
-    border-radius: var(--radius-md);
-    background: transparent;
-    color: var(--text-secondary);
-    border: 1px solid transparent;
-    transition: all 0.2s ease;
-    text-align: left;
-    width: 100%;
-  }
-
-  .connectors-row-item:hover {
-    background: var(--glass-stroke-light);
-    color: var(--text-primary);
-  }
-
-  .connectors-row-item.selected {
-    background: rgba(var(--brand-rgb), 0.12);
-    color: var(--text-primary);
-  }
-
-  .connectors-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.1rem;
-    min-width: 0;
-    flex: 1;
-  }
-
-  .connectors-switch {
-    position: relative;
-    width: 2rem;
-    height: 1.25rem;
-    background: rgba(88 88 88 / 0.3);
-    border-radius: 0.75rem;
-    cursor: pointer;
-    transition: background 0.2s ease;
-    flex-shrink: 0;
-  }
-
-  .connectors-switch:disabled {
-    opacity: 0.6;
+  .attach-btn:disabled {
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
-  .connectors-switch.active {
-    background: var(--brand-teal);
+  /* ---- chip: 26px pill, hairline ring, 5/8/5/10 padding ---- */
+  .chip {
+    height: 26px;
+    padding: 5px 8px 5px 10px;
+    border: none;
+    border-radius: 100px;
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--gx-hair-strong);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    color: var(--gx-slate-500);
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      box-shadow 120ms ease;
   }
 
-  .switch-thumb {
+  .chip:hover {
+    background: var(--gx-hover-soft);
+  }
+
+  .chip__label {
+    font-family: var(--gx-font-display);
+    font-weight: 500;
+    font-size: 12px;
+    line-height: 16px;
+    color: var(--gx-slate-700);
+    white-space: nowrap;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .chip__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+
+  .chip__icon :global(svg) {
+    width: 14px;
+    height: 14px;
+    display: block;
+  }
+
+  .provider-icon-img {
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    object-fit: contain;
+  }
+
+  .provider-icon-img :global(svg) {
+    width: 14px;
+    height: 14px;
+    display: block;
+  }
+
+  /* Enabled-tools counter riding on the Tools chip. */
+  .tools-badge {
+    min-width: 19px;
+    height: 16px;
+    border-radius: 8px;
+    background: var(--gx-tools-badge);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1px 6px;
+    box-sizing: border-box;
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 10px;
+    line-height: 100%;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  /* ---- image pill: 28px, squarer ring, its own locked state ---- */
+  .image-pill {
+    height: 28px;
+    padding: 6px 12px;
+    border: none;
+    border-radius: 18px;
+    background: var(--gx-card);
+    box-shadow: inset 0 0 0 1px var(--gx-cx-pill-ring);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    color: var(--gx-slate-600);
+    cursor: pointer;
+    transition:
+      background-color 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .image-pill:hover {
+    background: var(--gx-hover-soft);
+  }
+
+  .image-pill__label {
+    font-family: var(--gx-font);
+    font-weight: 500;
+    font-size: 13px;
+    line-height: 100%;
+    color: var(--gx-slate-600);
+    white-space: nowrap;
+  }
+
+  /* Image mode is live: the pill stays lit even with the picker closed. */
+  .image-pill--locked,
+  .image-pill--locked:hover {
+    background: var(--gx-ring-soft);
+    box-shadow: inset 0 0 0 1px var(--gx-org-primary-500);
+    color: var(--gx-org-primary-500);
+  }
+
+  .image-pill--locked .image-pill__label {
+    color: var(--gx-org-primary-500);
+  }
+
+  /* ---- 28px bare circle: web search ---- */
+  .circle-btn {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: 14px;
+    background: transparent;
+    box-shadow: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gx-slate-500);
+    flex-shrink: 0;
+    cursor: pointer;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .circle-btn:hover {
+    background: var(--gx-hover-soft);
+  }
+
+  /* The design draws no on-state for web search, but the toggle needs one. */
+  .circle-btn--active,
+  .circle-btn--active:hover {
+    background: var(--gx-ring-soft);
+    color: var(--gx-org-primary-500);
+    box-shadow: inset 0 0 0 1px var(--gx-org-primary-500);
+  }
+
+  .cx-chev {
+    flex-shrink: 0;
+    transition: transform 150ms ease;
+  }
+
+  .cx-chev--open {
+    transform: rotate(180deg);
+  }
+
+  /* ---- the open trigger, for every anchor ---- */
+  .dropdown-anchor.is-open > .chip,
+  .dropdown-anchor.is-open > .attach-btn,
+  .dropdown-anchor.is-open > .image-pill {
+    background: var(--gx-ring-soft);
+    box-shadow: inset 0 0 0 1px var(--gx-org-primary-500);
+    color: var(--gx-org-primary-500);
+  }
+
+  .dropdown-anchor.is-open > .chip .chip__label,
+  .dropdown-anchor.is-open > .image-pill .image-pill__label {
+    color: var(--gx-org-primary-500);
+  }
+
+  .dropdown-anchor.is-open > .chip .tools-badge {
+    background: var(--gx-org-primary-500);
+  }
+
+  /* =================== panels =================== */
+  /* The composer sits at the bottom of the viewport, so every panel opens
+     upward. Unlike the static mock these hold real registries, so they get a
+     height cap and their own scroll. */
+  .dropdown-panel {
     position: absolute;
-    top: 0.125rem;
-    left: 0.125rem;
-    width: 1rem;
-    height: 1rem;
-    background: white;
-    border-radius: 50%;
-    transition: transform 0.2s ease;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    bottom: calc(100% + 8px);
+    left: 0;
+    z-index: 40;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+    border-radius: 12px;
+    background: var(--gx-card);
+    box-shadow:
+      inset 0 0 0 1px var(--gx-cx-panel-ring),
+      var(--gx-cx-panel-shadow);
+    box-sizing: border-box;
+    max-height: min(440px, calc(100vh - 160px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
-  .connectors-switch.active .switch-thumb {
-    transform: translateX(1.25rem);
+  .cx-state {
+    font-family: var(--gx-font);
+    font-size: 12px;
+    color: var(--gx-cx-sub);
+    padding: 2px 0;
   }
 
-  .model-option .model-name {
+  .cx-state--error {
+    color: var(--gx-danger);
+  }
+
+  /* ---- attach menu ---- */
+  .attach-menu {
+    width: 254px;
+  }
+
+  .menu-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 6px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    box-shadow: none;
+    width: 100%;
+    box-sizing: border-box;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+
+  .menu-row:hover {
+    background: var(--gx-cx-row-hover);
+  }
+
+  .menu-row__icon {
+    display: inline-flex;
+    color: var(--gx-slate-600);
+    flex-shrink: 0;
+  }
+
+  .menu-row__text {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .menu-row__title {
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gx-cx-ink);
+  }
+
+  .menu-row__sub {
+    font-family: var(--gx-font);
+    font-size: 11px;
+    color: var(--gx-cx-sub);
+  }
+
+  /* ---- model picker ---- */
+  .model-picker {
+    width: 360px;
+  }
+
+  .model-search {
+    height: 36px;
+    border-radius: 6px;
+    background: var(--gx-cx-row-hover);
+    box-shadow: inset 0 0 0 1px var(--gx-cx-panel-ring);
+    display: flex;
+    gap: 8px;
+    padding: 0 10px;
+    align-items: center;
+    color: var(--gx-cx-sub);
+    box-sizing: border-box;
+    flex-shrink: 0;
+  }
+
+  /* app.css gives every input a glass fill, an inner shadow, a blur and a 2px
+     focus ring — inside this field wrapper that reads as a doubled ring. */
+  .model-search__input {
     flex: 1;
+    min-width: 0;
+    border: none;
+    outline: none;
+    background: none;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    padding: 0;
+    font-family: var(--gx-font);
+    font-size: 13px;
+    color: var(--gx-cx-ink);
+  }
+
+  .model-search__input:focus {
+    background: none;
+    box-shadow: none;
+    outline: none;
+    border: none;
+  }
+
+  .model-search__input::placeholder {
+    color: var(--gx-cx-sub);
+    opacity: 1;
+  }
+
+  .model-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 0;
+  }
+
+  .model-group__label {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--gx-cx-sub);
+    text-transform: uppercase;
+    padding: 0 4px 2px;
+  }
+
+  .model-row {
+    min-height: 32px;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    box-shadow: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    box-sizing: border-box;
+    text-align: left;
+    width: 100%;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+
+  .model-row:hover {
+    background: var(--gx-cx-row-hover);
+  }
+
+  .model-row--selected {
+    background: var(--gx-org-primary-tint);
+  }
+
+  .model-row__name {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--gx-font);
+    font-weight: 400;
+    font-size: 13px;
+    color: var(--gx-cx-ink);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .model-capabilities {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-  }
-
-  .capability-icon {
-    opacity: 0.6;
-    flex-shrink: 0;
-  }
-
-  .capability-icon.active {
-    opacity: 1;
-  }
-
-  /* Model-type icons in the dropdown rows */
-  .capability-icon.type-image {
-    color: #8b5cf6;
-  }
-
-  .capability-icon.type-text {
-    color: var(--text-secondary);
-    opacity: 0.75;
-  }
-
-  /* Image-model indicator on the selected-model trigger */
-  .trigger-type-icon {
-    flex-shrink: 0;
-    color: #8b5cf6;
-  }
-
-  /* Sub-group heading inside a provider section ("Image generation") */
-  .model-subgroup-label {
-    display: flex;
-    align-items: center;
-    gap: var(--space-xs);
-    padding: var(--space-xs) var(--space-md) var(--space-2xs);
-    margin-top: var(--space-xs);
-    font-size: 0.6875rem;
+  .model-row--selected .model-row__name {
     font-weight: 600;
-    color: #8b5cf6;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
   }
 
-  .model-subgroup-label svg {
+  .model-row__check {
+    color: var(--gx-tools-badge);
     flex-shrink: 0;
-    opacity: 0.85;
   }
 
-  /* Image-mode hint above the composer */
-  .image-mode-hint {
+  .model-brand-row {
+    min-height: 34px;
+    display: flex;
+    gap: 8px;
+    padding: 6px 4px;
+    align-items: center;
+    width: 100%;
+    box-sizing: border-box;
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    box-shadow: none;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+
+  .model-brand-row:hover {
+    background: var(--gx-cx-row-hover);
+  }
+
+  .chev-toggle {
+    color: var(--gx-cx-sub);
+    flex-shrink: 0;
+    transition: transform 150ms ease;
+  }
+
+  .chev-toggle--collapsed {
+    transform: rotate(-90deg);
+  }
+
+  /* Real provider icons stand in for the design's letter tiles; the letter
+     tile is the fallback when the registry ships no icon. */
+  .brand-badge {
+    width: 18px;
+    height: 18px;
+    border-radius: 3px;
+    background: var(--gx-cx-ink);
     display: flex;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-xs) var(--space-md);
-    border-radius: var(--radius-md);
-    background: rgba(139, 92, 246, 0.08);
-    border: 1px solid rgba(139, 92, 246, 0.2);
-    color: var(--text-secondary);
-    font-size: 0.8125rem;
-    line-height: 1.4;
-    animation: hintSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  .image-mode-hint svg {
+    justify-content: center;
+    color: #fff;
+    font-family: var(--gx-font);
+    font-weight: 800;
+    font-size: 10px;
     flex-shrink: 0;
-    color: #8b5cf6;
   }
 
-  @keyframes hintSlideIn {
-    from {
-      opacity: 0;
-      transform: translateY(4px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  /* Registry icons paint with `fill="currentColor"`, so the icon variant has to
+     drop the letter tile's white ink or the logo disappears on the white tile. */
+  .brand-badge--icon {
+    background: transparent;
+    color: var(--gx-cx-ink);
+    object-fit: contain;
+  }
+
+  .brand-badge--icon :global(svg) {
+    width: 18px;
+    height: 18px;
+    display: block;
+  }
+
+  .model-brand-row__name {
+    flex-grow: 1;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gx-cx-ink);
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .model-brand-row__count {
+    font-family: var(--gx-font);
+    font-size: 12px;
+    color: var(--gx-cx-sub);
+    flex-shrink: 0;
+  }
+
+  .model-brand-children {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-left: 40px;
+  }
+
+  .model-row--child {
+    min-height: 24px;
+    padding: 4px 6px;
+    justify-content: flex-start;
+    gap: 6px;
+  }
+
+  .model-row--child .model-row__name {
+    font-weight: 400;
+    font-size: 13px;
+    color: var(--gx-slate-600);
+  }
+
+  .model-row--child.model-row--selected .model-row__name {
+    font-weight: 600;
+    color: var(--gx-cx-ink);
+  }
+
+  .model-tag {
+    height: 16px;
+    border-radius: 4px;
+    background: var(--gx-cx-tag-bg);
+    padding: 2px 6px;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 10px;
+    line-height: 12px;
+    color: var(--gx-slate-600);
+    flex-shrink: 0;
+  }
+
+  .model-legacy-link {
+    align-self: flex-start;
+    border: none;
+    background: none;
+    box-shadow: none;
+    padding: 4px 0;
+    font-family: var(--gx-font);
+    font-size: 12px;
+    color: var(--gx-tools-badge);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
+  /* ---- tools menu ---- */
+  /* Real orgs can have many skills and connectors, so each list scrolls inside
+     its own box: the head and the "Manage connectors" footer stay put instead
+     of scrolling out of the panel. */
+  .tools-menu {
+    width: 300px;
+    max-height: min(560px, calc(100vh - 140px));
+  }
+
+  .tools-menu__head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-bottom: 4px;
+  }
+
+  .tools-menu__title {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--gx-cx-ink);
+  }
+
+  .tools-menu__sub {
+    font-family: var(--gx-font);
+    font-size: 12px;
+    color: var(--gx-cx-sub);
+  }
+
+  .tools-skills-box {
+    max-height: 160px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: 12px;
+    box-shadow: inset 0 0 0 1px var(--gx-cx-panel-ring);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 6px 8px;
+  }
+
+  .tools-section-label {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 1px;
+    color: var(--gx-cx-sub);
+    text-transform: uppercase;
+  }
+
+  .tools-connectors {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 6px 0;
+    max-height: 190px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .connector-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .connector-icon {
+    display: inline-flex;
+    color: var(--gx-slate-600);
+    flex-shrink: 0;
+  }
+
+  .connector-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex-grow: 1;
+    min-width: 0;
+  }
+
+  .connector-name {
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gx-cx-ink);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .connector-status {
+    font-family: var(--gx-font);
+    font-size: 11px;
+  }
+
+  .connector-status--on {
+    color: var(--gx-cx-toggle-on);
+  }
+
+  .connector-status--off {
+    color: var(--gx-cx-sub);
+  }
+
+  /* 36x20 track / 16px thumb — same switch the skills rows use. */
+  .toggle {
+    width: 36px;
+    height: 20px;
+    min-width: 36px;
+    border-radius: 10px;
+    border: none;
+    background: var(--gx-cx-toggle-off);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    padding: 2px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+    cursor: pointer;
+    box-shadow: none;
+    transition: background-color 120ms ease;
+  }
+
+  .toggle::after {
+    content: "";
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+  }
+
+  .toggle--on {
+    background: var(--gx-cx-toggle-on);
+    justify-content: flex-end;
+  }
+
+  .tools-menu__footer {
+    flex-shrink: 0;
+    text-align: center;
+    padding: 6px 0;
+    border: none;
+    background: none;
+    box-shadow: none;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gx-tools-badge);
+    cursor: pointer;
+  }
+
+  /* ---- image model picker ---- */
+  .image-model-picker {
+    width: 290px;
+  }
+
+  .image-model-head {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 8px 8px 6px;
+    border-radius: 8px;
+    box-shadow: inset 0 0 0 1px var(--gx-cx-panel-ring);
+  }
+
+  .image-model-head__icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--gx-cx-img-accent);
+    flex-shrink: 0;
+  }
+
+  .image-model-head__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .image-model-head__title {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 14px;
+    color: var(--gx-cx-ink);
+  }
+
+  .image-model-head__sub {
+    font-family: var(--gx-font);
+    font-size: 12px;
+    color: var(--gx-cx-sub);
+  }
+
+  .image-model-row {
+    border: none;
+    border-radius: 6px;
+    background: transparent;
+    box-shadow: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    gap: 10px;
+    box-sizing: border-box;
+    text-align: left;
+    width: 100%;
+    cursor: pointer;
+    transition: background-color 120ms ease;
+  }
+
+  .image-model-row:hover {
+    background: var(--gx-cx-row-hover);
+  }
+
+  .image-model-row--selected {
+    background: var(--gx-cx-img-tint);
+  }
+
+  .image-model-row__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .image-model-row__name {
+    font-family: var(--gx-font);
+    font-weight: 400;
+    font-size: 13px;
+    color: var(--gx-cx-ink);
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .image-model-row--selected .image-model-row__name {
+    font-weight: 600;
+  }
+
+  .image-model-row__check {
+    color: var(--gx-cx-img-accent);
+    flex-shrink: 0;
+  }
+
+  /* =================== image mode =================== */
+  /* The design writes `align-items: flex-start` here and then puts
+     `align-self: stretch` on the composer itself; stretching from the parent is
+     the same result and stops the card shrink-wrapping to its toolbar when the
+     text is short (which clipped it on narrow viewports). */
+  .composer-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .image-mode-banner {
+    height: 32px;
+    border-radius: 16px 16px 0 0;
+    background: var(--gx-an-blue-label);
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    align-self: stretch;
+    box-sizing: border-box;
+  }
+
+  .image-mode-banner__left {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    color: #fff;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 12px;
+  }
+
+  .image-mode-banner__close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    color: #fff;
+    cursor: pointer;
+    line-height: 1;
+    padding: 0;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  /* The banner owns the top corners while it is up. */
+  .input-container-main--image-mode {
+    border-radius: 0 0 16px 16px;
+  }
+
+  .dropdown-panel--hidden {
+    display: none;
+  }
+
+  .dropdown-empty {
+    padding: 8px 4px;
+    font-family: var(--gx-font);
+    font-size: 12px;
+    color: var(--gx-cx-sub);
+    text-align: center;
   }
 
   .dropdown-loading,
@@ -2413,148 +3433,312 @@ SPDX-License-Identifier: Apache-2.0
   }
 
   /* ===== File Attachments ===== */
-  .file-attachments {
+  /* ===== Pending attachments =====
+     The design draws one attachment vocabulary (chat-empty-state.html
+     ".attachment-grid"): a 130x100 tile at 12px radius for an image, a 220x60
+     card for anything else. The composer reuses those exact metrics so the
+     preview and the sent turn are the same object. */
+  .pending-attachments {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 8px;
     width: 100%;
-    padding: var(--space-xs) 0;
+    min-width: 0;
   }
 
-  .file-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    border-radius: 10px;
-    background: var(--glass-bg-dark);
-    backdrop-filter: blur(var(--glass-blur));
-    -webkit-backdrop-filter: blur(var(--glass-blur));
-    border: 1px solid var(--glass-stroke-dark);
-    font-size: 0.8125rem;
-    color: var(--text-primary);
-    transition: all 0.2s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-    max-width: 240px;
+  .pending-attachment {
+    position: relative;
+    flex-shrink: 0;
+    transition:
+      opacity 160ms ease,
+      box-shadow 160ms ease;
   }
 
-  .file-pill:hover {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  .pending-attachment--uploading {
+    opacity: 0.7;
   }
 
-  .file-pill-image {
-    padding: 4px;
+  /* ---- image: the design's ".att-image" tile ---- */
+  .pending-attachment--image {
+    width: 130px;
+    height: 100px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: linear-gradient(
+      127.6deg,
+      var(--gx-tx-att-img-from) 0%,
+      var(--gx-tx-att-img-to) 100%
+    );
   }
 
-  .thumbnail-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .pending-attachment__thumb {
+    display: block;
+    width: 100%;
+    height: 100%;
     padding: 0;
     border: none;
     background: transparent;
     cursor: pointer;
-    border-radius: 6px;
-    transition: transform 0.15s ease;
-    overflow: hidden;
   }
 
-  .thumbnail-button:hover {
-    transform: scale(1.05);
+  .pending-attachment__thumb:focus-visible {
+    outline: 2px solid var(--gx-nav-accent);
+    outline-offset: -2px;
   }
 
-  .file-thumbnail {
-    width: 36px;
-    height: 36px;
+  .pending-attachment__image {
+    display: block;
+    width: 100%;
+    height: 100%;
     object-fit: cover;
-    border-radius: 6px;
   }
 
-  .thumbnail-placeholder,
-  .file-icon-button {
-    width: 36px;
-    height: 36px;
+  .pending-attachment__placeholder {
+    display: flex;
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.85);
+  }
+
+  /* ---- video: the design's ".att-video" tile ---- */
+  .pending-attachment--video {
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--btn-tertiary);
-    border-radius: 6px;
-    color: var(--text-secondary);
+    width: 130px;
+    height: 100px;
+    border-radius: 12px;
+    overflow: hidden;
+    background: linear-gradient(
+      127.6deg,
+      var(--gx-tx-att-vid-from) 0%,
+      var(--gx-tx-att-vid-to) 100%
+    );
   }
 
-  .file-name {
-    max-width: 120px;
+  .pending-attachment__poster {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .pending-attachment__play {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 17px;
+    background: #fff;
+    box-shadow: 0 2px 6px 0 rgba(0, 0, 0, 0.149);
+    color: rgb(28, 41, 56);
+    flex-shrink: 0;
+  }
+
+  .pending-attachment__duration {
+    position: absolute;
+    z-index: 1;
+    inset-inline-end: 6px;
+    bottom: 6px;
+    border-radius: 4px;
+    background: rgba(0, 0, 0, 0.702);
+    padding: 2px 4px;
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 10px;
+    line-height: 12px;
+    color: #fff;
+  }
+
+  /* ---- file: the design's ".att-file" card ---- */
+  .pending-attachment--file {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 220px;
+    height: 60px;
+    box-sizing: border-box;
+    padding: 12px 12px 12px 12px;
+    border-radius: 12px;
+    background: var(--gx-card);
+    box-shadow:
+      inset 0 0 0 1px var(--gx-tx-chip-ring),
+      0 2px 8px 0 rgba(0, 0, 0, 0.0392);
+  }
+
+  .pending-attachment--file.pending-attachment--failed {
+    box-shadow: inset 0 0 0 1px var(--gx-danger);
+  }
+
+  .pending-attachment__open {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    text-align: start;
+  }
+
+  .pending-attachment__open:focus-visible {
+    outline: 2px solid var(--gx-nav-accent);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+
+  .pending-attachment__icon {
+    display: flex;
+    width: 36px;
+    height: 36px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: var(--gx-tx-file-icon-bg);
+    color: var(--gx-tx-file-icon-fg);
+    flex-shrink: 0;
+  }
+
+  .pending-attachment__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .pending-attachment__name {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--gx-tx-ink);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-weight: 500;
-    font-size: 0.8125rem;
   }
 
-  .file-size {
-    font-size: 0.6875rem;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-    opacity: 0.7;
-  }
-
-  .pill-remove-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    padding: 0;
-    border: none;
-    border-radius: 50%;
-    background: rgba(0, 0, 0, 0.1);
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.15s ease;
-    flex-shrink: 0;
-    opacity: 0.6;
-  }
-
-  .file-pill:hover .pill-remove-btn {
-    opacity: 1;
-  }
-
-  .pill-remove-btn:hover {
-    background: var(--brand-red, #ef4444);
-    color: white;
-    transform: scale(1.1);
-    opacity: 1;
-  }
-
-  /* Upload status indicators */
-  .pill-upload-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 0.6875rem;
-    font-weight: 600;
-    flex-shrink: 0;
-    line-height: 1;
-  }
-
-  .pill-upload-status.uploading {
-    color: var(--text-secondary);
-  }
-
-  .pill-upload-status.success {
-    color: var(--brand-green, #22c55e);
-    font-size: 0.75rem;
-  }
-
-  .pill-upload-status.failed {
-    color: var(--brand-red, #ef4444);
-  }
-
-  .pill-status-text {
+  /* Doubles as the status line: size normally, "Uploading…"/"Failed" while the
+     upload is in flight, so a file card never needs a second row. */
+  .pending-attachment__size {
+    font-family: var(--gx-font);
+    font-size: 11px;
+    line-height: 14px;
+    color: var(--gx-tx-file-size);
+    overflow: hidden;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .pill-spinner {
+  .pending-attachment--failed .pending-attachment__size {
+    color: var(--gx-danger);
+  }
+
+  /* ---- remove: the design's ".att-file__dl" slot on a card, a floating
+     control over a tile ---- */
+  .pending-attachment__remove {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: none;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease,
+      opacity 120ms ease;
+  }
+
+  .pending-attachment__remove--inline {
+    margin-inline-start: auto;
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    background: transparent;
+    color: var(--gx-tx-file-size);
+  }
+
+  .pending-attachment__remove--inline:hover {
+    background: var(--gx-danger-soft);
+    color: var(--gx-danger);
+  }
+
+  /* Over an image there is no card edge to sit on, so the control carries its
+     own scrim. Always visible on touch, where there is no hover. */
+  .pending-attachment--image .pending-attachment__remove,
+  .pending-attachment--video .pending-attachment__remove {
+    position: absolute;
+    top: 6px;
+    inset-inline-end: 6px;
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    background: rgba(14, 24, 40, 0.72);
+    color: #fff;
+    opacity: 0;
+  }
+
+  .pending-attachment--image:hover .pending-attachment__remove,
+  .pending-attachment--image .pending-attachment__remove:focus-visible,
+  .pending-attachment--video:hover .pending-attachment__remove,
+  .pending-attachment--video .pending-attachment__remove:focus-visible {
+    opacity: 1;
+  }
+
+  @media (hover: none) {
+    .pending-attachment--image .pending-attachment__remove,
+    .pending-attachment--video .pending-attachment__remove {
+      opacity: 1;
+    }
+  }
+
+  .pending-attachment__remove:focus-visible {
+    outline: 2px solid var(--gx-nav-accent);
+    outline-offset: 2px;
+  }
+
+  /* ---- upload status ---- */
+  .pending-attachment__badge {
+    position: absolute;
+    left: 6px;
+    bottom: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    background: rgba(14, 24, 40, 0.72);
+    font-size: 11px;
+    line-height: 1;
+    color: #fff;
+  }
+
+  .pending-attachment__badge--done {
+    background: var(--gx-send);
+  }
+
+  .pending-attachment__badge--failed {
+    background: var(--gx-danger);
+  }
+
+  .pending-attachment__check {
+    flex-shrink: 0;
+    font-size: 12px;
+    line-height: 1;
+    color: var(--gx-send);
+  }
+
+  .pending-attachment__spinner {
+    flex-shrink: 0;
     width: 12px;
     height: 12px;
     border: 1.5px solid rgba(var(--brand-rgb), 0.15);
@@ -2563,20 +3747,15 @@ SPDX-License-Identifier: Apache-2.0
     animation: pill-spin 0.7s linear infinite;
   }
 
+  .pending-attachment__badge .pending-attachment__spinner {
+    border-color: rgba(255, 255, 255, 0.3);
+    border-top-color: #fff;
+  }
+
   @keyframes pill-spin {
     to {
       transform: rotate(360deg);
     }
-  }
-
-  .file-pill-uploading {
-    opacity: 0.75;
-    border-style: dashed;
-  }
-
-  .file-pill-failed {
-    border-color: rgba(239, 68, 68, 0.4);
-    background: rgba(239, 68, 68, 0.05);
   }
 
   /* ===== Preview Modal ===== */
@@ -2724,59 +3903,46 @@ SPDX-License-Identifier: Apache-2.0
       max-width: 100%;
     }
 
-    .input-container-main {
-      border-radius: var(--radius-md);
-      min-height: 2.25rem;
-    }
-
     .chat-input-textarea {
       font-size: 1rem; /* Prevent iOS zoom */
-      padding: var(--space-xs) var(--space-sm);
-      padding-bottom: calc(1.75rem + var(--space-xs));
     }
 
-    .input-bottom-bar {
-      padding: var(--space-2xs) var(--space-xs);
-      gap: var(--space-xs);
-      min-height: 1.75rem;
-    }
-
-    .selector-label,
-    .toggle-label,
-    .connectors-label {
+    /* Below the design width the toolbar runs out of room, so the chips shed
+       their labels and the panels stop being 360px wide. */
+    .chip__label,
+    .image-pill__label {
       display: none;
     }
 
-    .selector-btn {
-      padding: var(--space-xs);
-      border-radius: 50%;
-      gap: 0;
+    .chip {
+      padding: 5px 8px;
+      gap: 4px;
     }
 
-    .connectors-trigger {
-      width: 1.625rem;
-      min-width: 1.625rem;
-      height: 1.625rem;
-      padding: 0;
-      border-radius: 50%;
-      justify-content: center;
-      gap: 0;
+    .image-pill {
+      padding: 6px 8px;
+      gap: 4px;
     }
 
-    .toggle-btn {
-      width: 1.625rem;
-      min-width: 1.625rem;
-      height: 1.625rem;
-      padding: 0;
-    }
-
-    .toggle-btn svg {
-      width: 12px;
-      height: 12px;
-    }
-
-    .dropdown-arrow {
+    .cx-chev {
       display: none;
+    }
+
+    .dropdown-panel {
+      max-height: min(360px, calc(100vh - 200px));
+    }
+
+    .model-picker,
+    .tools-menu,
+    .image-model-picker,
+    .attach-menu {
+      width: min(320px, calc(100vw - 48px));
+    }
+
+    .attach-btn {
+      width: 30px;
+      height: 30px;
+      border-radius: 15px;
     }
 
     .input-btn {
@@ -2801,36 +3967,16 @@ SPDX-License-Identifier: Apache-2.0
       height: 11px;
     }
 
-    .toggle-btn {
-      width: 1.5rem;
-      min-width: 1.5rem;
-      height: 1.5rem;
+    /* Narrow viewports: shrink the tile and let a file card take the row. */
+    .pending-attachment--image,
+    .pending-attachment--video {
+      width: 104px;
+      height: 80px;
     }
 
-    .connectors-trigger {
-      width: 1.5rem;
-      min-width: 1.5rem;
-      height: 1.5rem;
-    }
-
-    .toggle-btn svg {
-      width: 11px;
-      height: 11px;
-    }
-
-    .file-pill {
-      font-size: 0.8125rem;
-    }
-
-    .file-name {
-      max-width: 100px;
-    }
-
-    .file-thumbnail,
-    .thumbnail-placeholder,
-    .file-icon-button {
-      width: 28px;
-      height: 28px;
+    .pending-attachment--file {
+      width: 100%;
+      max-width: 220px;
     }
   }
 </style>

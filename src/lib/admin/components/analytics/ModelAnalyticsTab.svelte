@@ -223,9 +223,9 @@ SPDX-License-Identifier: Apache-2.0
     flex: 1;
     min-width: 0;
     font-weight: 600;
-    font-size: 11px;
+    font-size: 14px;
     line-height: 100%;
-    text-transform: uppercase;
+    letter-spacing: 0%;
     color: var(--gx-an-sub);
   }
 

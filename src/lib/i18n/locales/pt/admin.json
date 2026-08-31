@@ -1296,7 +1296,10 @@
     "retry": "Tentar novamente",
     "errors": {
       "fetchFailed": "Falha ao buscar dados de visão geral"
-    }
+    },
+    "welcomeBack": "Bem-vindo de volta, {name} 👋",
+    "welcomeSummary": "Seu espaço de trabalho usou {cost} entre {users} usuários nos últimos 30 dias",
+    "connectAccount": "Conectar conta"
   },
   "systemMetrics": {
     "title": "Sistema",

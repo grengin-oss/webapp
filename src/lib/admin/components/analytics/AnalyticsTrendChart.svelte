@@ -59,14 +59,20 @@ SPDX-License-Identifier: Apache-2.0
   const MAX_BAR_PX = 16;
   /** Gap between the bars of one group (Success next to Errors). */
   const BAR_GAP_PX = 3;
+  /** The design's bars are divs with border-radius: 3px. */
+  const BAR_RADIUS_PX = 3;
 
   let plotEl = $state<HTMLDivElement | null>(null);
   let plotWidth = $state(0);
   let hoverIndex = $state<number | null>(null);
 
-  const pointCount = $derived(Math.max(...series.map((s) => s.values.length), 0));
+  const pointCount = $derived(
+    Math.max(...series.map((s) => s.values.length), 0),
+  );
   const plotted = $derived(series.filter((s) => !s.tooltipOnly));
-  const leftSeries = $derived(plotted.filter((s) => (s.axis ?? "left") === "left"));
+  const leftSeries = $derived(
+    plotted.filter((s) => (s.axis ?? "left") === "left"),
+  );
   const rightSeries = $derived(plotted.filter((s) => s.axis === "right"));
 
   /** Bars share one band per point, so they need to know the whole group. */
@@ -100,11 +106,15 @@ SPDX-License-Identifier: Apache-2.0
 
   function ticks(max: number, format?: (value: number) => string): string[] {
     const fmt = format ?? ((value: number) => String(Math.round(value)));
-    return Array.from({ length: Y_STEPS + 1 }, (_, i) => fmt((max * (Y_STEPS - i)) / Y_STEPS));
+    return Array.from({ length: Y_STEPS + 1 }, (_, i) =>
+      fmt((max * (Y_STEPS - i)) / Y_STEPS),
+    );
   }
 
   const leftTicks = $derived(ticks(leftMax, leftSeries[0]?.format));
-  const rightTicks = $derived(rightSeries.length > 0 ? ticks(rightMax, rightSeries[0]?.format) : []);
+  const rightTicks = $derived(
+    rightSeries.length > 0 ? ticks(rightMax, rightSeries[0]?.format) : [],
+  );
 
   function xFor(index: number): number {
     if (pointCount <= 1) return VIEW_W / 2;
@@ -200,6 +210,14 @@ SPDX-License-Identifier: Apache-2.0
     return Math.min(share, MAX_BAR_PX * unitsPerPixel);
   });
 
+  /**
+   * Only the horizontal axis is stretched, so the corner radius needs its own
+   * x value to come out as 3px both ways rather than as an ellipse.
+   */
+  const barRadiusX = $derived(
+    unitsPerPixel > 0 ? BAR_RADIUS_PX * unitsPerPixel : BAR_RADIUS_PX,
+  );
+
   /** Derived from the capped width so a Success/Errors pair stays centred. */
   const barGroupWidth = $derived(
     barWidth * barSeries.length + barGap * Math.max(0, barSeries.length - 1),
@@ -207,7 +225,10 @@ SPDX-License-Identifier: Apache-2.0
 
   function barX(seriesIndex: number, index: number): number {
     const start = xFor(index) - barGroupWidth / 2;
-    const clamped = Math.min(Math.max(start, 0), Math.max(0, VIEW_W - barGroupWidth));
+    const clamped = Math.min(
+      Math.max(start, 0),
+      Math.max(0, VIEW_W - barGroupWidth),
+    );
     return clamped + seriesIndex * (barWidth + barGap);
   }
 
@@ -218,7 +239,8 @@ SPDX-License-Identifier: Apache-2.0
   /** Evenly spaced label slots, always keeping the first and last point. */
   const tickIndices = $derived.by(() => {
     if (pointCount === 0) return [];
-    if (pointCount <= maxTicks) return Array.from({ length: pointCount }, (_, i) => i);
+    if (pointCount <= maxTicks)
+      return Array.from({ length: pointCount }, (_, i) => i);
     const step = (pointCount - 1) / (maxTicks - 1);
     return Array.from({ length: maxTicks }, (_, i) => Math.round(i * step));
   });
@@ -230,12 +252,17 @@ SPDX-License-Identifier: Apache-2.0
   function handleMove(event: MouseEvent) {
     if (!plotEl || pointCount === 0) return;
     const rect = plotEl.getBoundingClientRect();
-    const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
+    const ratio = Math.min(
+      Math.max((event.clientX - rect.left) / rect.width, 0),
+      1,
+    );
     hoverIndex = Math.round(ratio * (pointCount - 1));
   }
 
   const hoverLeftPercent = $derived(
-    hoverIndex === null || pointCount <= 1 ? 0 : (hoverIndex / (pointCount - 1)) * 100,
+    hoverIndex === null || pointCount <= 1
+      ? 0
+      : (hoverIndex / (pointCount - 1)) * 100,
   );
 </script>
 
@@ -270,7 +297,12 @@ SPDX-License-Identifier: Apache-2.0
       <!-- areas sit furthest back so a line drawn over them stays readable -->
       {#each curveSeries as item (item.key)}
         {#if item.kind === "area" && item.values.length > 1}
-          <path d={areaPathFor(item)} fill={item.color} fill-opacity="0.12" stroke="none" />
+          <path
+            d={areaPathFor(item)}
+            fill={item.color}
+            fill-opacity="0.12"
+            stroke="none"
+          />
         {/if}
       {/each}
 
@@ -282,9 +314,12 @@ SPDX-License-Identifier: Apache-2.0
             y={top}
             width={barWidth}
             height={Math.max(0, baseline - top)}
-            rx="1"
+            rx={barRadiusX}
+            ry={BAR_RADIUS_PX}
             fill={item.color}
-            fill-opacity={hoverIndex === null || hoverIndex === index ? 1 : 0.45}
+            fill-opacity={hoverIndex === null || hoverIndex === index
+              ? 1
+              : 0.45}
           />
         {/each}
       {/each}
@@ -294,7 +329,7 @@ SPDX-License-Identifier: Apache-2.0
           d={strokePathFor(item)}
           fill="none"
           stroke={item.color}
-          stroke-width="2.2"
+          stroke-width="4"
           stroke-linejoin="round"
           stroke-linecap="round"
           vector-effect="non-scaling-stroke"
@@ -333,12 +368,17 @@ SPDX-License-Identifier: Apache-2.0
         class:chart-tooltip--flip={hoverLeftPercent > 60}
         style="inset-inline-start: {hoverLeftPercent}%"
       >
-        <span class="chart-tooltip__date">{(tooltipLabels ?? labels)[hoverIndex] ?? ""}</span>
+        <span class="chart-tooltip__date"
+          >{(tooltipLabels ?? labels)[hoverIndex] ?? ""}</span
+        >
         {#each series as item (item.key)}
           <span class="chart-tooltip__row">
-            <span class="chart-tooltip__dot" style="background: {item.color}"></span>
+            <span class="chart-tooltip__dot" style="background: {item.color}"
+            ></span>
             <span class="chart-tooltip__label">{item.label}</span>
-            <span class="chart-tooltip__value">{formatValue(item, item.values[hoverIndex] ?? 0)}</span>
+            <span class="chart-tooltip__value"
+              >{formatValue(item, item.values[hoverIndex] ?? 0)}</span
+            >
           </span>
         {/each}
       </div>

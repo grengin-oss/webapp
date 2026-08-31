@@ -1296,7 +1296,10 @@
     "retry": "إعادة المحاولة",
     "errors": {
       "fetchFailed": "تعذر جلب بيانات النظرة العامة"
-    }
+    },
+    "welcomeBack": "مرحبًا بعودتك، {name} 👋",
+    "welcomeSummary": "استخدمت مساحة عملك {cost} عبر {users} مستخدمًا خلال الثلاثين يومًا الماضية",
+    "connectAccount": "ربط حساب"
   },
   "systemMetrics": {
     "title": "النظام",

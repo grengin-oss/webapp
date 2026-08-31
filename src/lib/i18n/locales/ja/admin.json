@@ -1296,7 +1296,10 @@
     "retry": "再試行",
     "errors": {
       "fetchFailed": "概要データの取得に失敗しました"
-    }
+    },
+    "welcomeBack": "おかえりなさい、{name}さん 👋",
+    "welcomeSummary": "過去30日間でワークスペースの{users}人のユーザーが{cost}を使用しました",
+    "connectAccount": "アカウントを接続"
   },
   "systemMetrics": {
     "title": "システム",

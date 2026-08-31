@@ -595,9 +595,9 @@ SPDX-License-Identifier: Apache-2.0
     display: flex;
     align-items: center;
     font-weight: 600;
-    font-size: 11px;
+    font-size: 14px;
     line-height: 100%;
-    text-transform: uppercase;
+    letter-spacing: 0%;
     color: var(--gx-an-sub);
   }
 
@@ -622,16 +622,13 @@ SPDX-License-Identifier: Apache-2.0
     justify-content: flex-start;
     font-family: inherit;
     font-weight: 600;
-    font-size: 11px;
+    font-size: 14px;
     line-height: 100%;
-    text-transform: uppercase;
+    letter-spacing: 0%;
     color: var(--gx-an-sub);
     cursor: pointer;
   }
 
-  .department-tab .table-header span {
-    font-size: 11px;
-  }
 
   .sort-btn:hover {
     color: var(--gx-ink);

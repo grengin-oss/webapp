@@ -374,7 +374,7 @@ SPDX-License-Identifier: Apache-2.0
     display: flex;
     flex-direction: column;
     height: 100vh;
-    border-left: 1px solid var(--glass-border, rgba(255, 255, 255, 0.08));
+    border-left: 1px solid var(--surface-border);
     background: var(--bg-primary);
     animation: panelSlideIn 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
@@ -396,8 +396,8 @@ SPDX-License-Identifier: Apache-2.0
     align-items: center;
     justify-content: space-between;
     padding: 8px 12px;
-    border-bottom: 1px solid var(--glass-border, rgba(255, 255, 255, 0.12));
-    background: rgba(var(--glass-tint, 255, 255, 255), 0.06);
+    border-bottom: 1px solid var(--surface-border);
+    background: var(--surface-subtle);
     flex-shrink: 0;
   }
 
@@ -511,10 +511,14 @@ SPDX-License-Identifier: Apache-2.0
   }
 
   /* ── View toggle (icon-only pill) ── */
+  /* Segmented control. Every colour here has to come from a token with both
+     theme variants: the panel background is --bg-primary, which flips with the
+     theme, so the hardcoded white-on-white this used to carry made the ACTIVE
+     segment's icon invisible in light mode (and the inactive #aaa nearly so). */
   .view-toggle {
     display: flex;
-    background: rgba(var(--glass-tint, 255, 255, 255), 0.1);
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: var(--surface-card);
+    border: 1px solid var(--surface-border);
     border-radius: 10px;
     padding: 3px;
     gap: 2px;
@@ -528,20 +532,22 @@ SPDX-License-Identifier: Apache-2.0
     border: none;
     border-radius: 7px;
     background: transparent;
-    color: #aaa;
+    color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .toggle-btn:hover:not(:disabled) {
-    color: #fff;
-    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    background: var(--btn-tertiary);
   }
 
+  /* The raised segment: lifts off the track in both themes rather than relying
+     on a translucent white that only reads on a dark surface. */
   .toggle-btn.active {
-    background: rgba(255, 255, 255, 0.18);
-    color: #fff;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+    background: var(--surface-card-interactive);
+    color: var(--text-primary);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
   }
 
   .toggle-btn:disabled {
@@ -584,14 +590,14 @@ SPDX-License-Identifier: Apache-2.0
     border: none;
     border-radius: 8px;
     background: transparent;
-    color: #aaa;
+    color: var(--text-secondary);
     cursor: pointer;
     transition: all 0.15s;
   }
 
   .header-btn:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: #fff;
+    background: var(--btn-tertiary);
+    color: var(--text-primary);
   }
 
   .header-btn.success {
