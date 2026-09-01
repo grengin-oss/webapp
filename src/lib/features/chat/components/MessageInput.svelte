@@ -124,6 +124,36 @@ SPDX-License-Identifier: Apache-2.0
   type ComposerMenu = "attach" | "model" | "tools" | "image";
   let openMenu = $state<ComposerMenu | null>(null);
 
+  let composerRoot = $state<HTMLDivElement | null>(null);
+
+  /**
+   * The panels open upward (`bottom: 100% + 8px`), so their height has to be
+   * capped by the space ABOVE the trigger. Capping by viewport height instead
+   * clipped them off the top whenever the composer sat high in the window — in
+   * the empty state it is vertically centred, so a 700px window left only ~390px
+   * above the chip while the panel still asked for 440px, putting the search
+   * field out of reach.
+   */
+  const PANEL_GUTTER = 16;
+  const PANEL_MIN_H = 180;
+
+  function syncPanelMaxHeight() {
+    const anchor = composerRoot?.querySelector<HTMLElement>(
+      ".dropdown-anchor.is-open",
+    );
+    if (!anchor) return;
+    const available = anchor.getBoundingClientRect().top - PANEL_GUTTER;
+    anchor.style.setProperty(
+      "--dropdown-max-h",
+      `${Math.max(PANEL_MIN_H, Math.floor(available))}px`,
+    );
+  }
+
+  $effect(() => {
+    if (!openMenu) return;
+    tick().then(syncPanelMaxHeight);
+  });
+
   function toggleMenu(menu: ComposerMenu) {
     openMenu = openMenu === menu ? null : menu;
   }
@@ -884,9 +914,11 @@ SPDX-License-Identifier: Apache-2.0
   onMount(() => {
     document.addEventListener("click", handleClickOutside);
     document.addEventListener("keydown", handleMenuKeydown);
+    window.addEventListener("resize", syncPanelMaxHeight);
     return () => {
       document.removeEventListener("click", handleClickOutside);
       document.removeEventListener("keydown", handleMenuKeydown);
+      window.removeEventListener("resize", syncPanelMaxHeight);
       Object.keys(videoPosters).forEach(releaseVideoPoster);
     };
   });
@@ -1008,6 +1040,7 @@ SPDX-License-Identifier: Apache-2.0
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
+  bind:this={composerRoot}
   class="input-area-wrapper"
   class:dragging={isDraggingFiles}
   ondragenter={handleDragEnter}
@@ -2780,7 +2813,9 @@ SPDX-License-Identifier: Apache-2.0
       inset 0 0 0 1px var(--gx-cx-panel-ring),
       var(--gx-cx-panel-shadow);
     box-sizing: border-box;
-    max-height: min(440px, calc(100vh - 160px));
+    /* --dropdown-max-h is the measured space above the trigger (see
+       syncPanelMaxHeight); the calc() is only the pre-measurement fallback. */
+    max-height: min(440px, var(--dropdown-max-h, calc(100vh - 160px)));
     overflow-y: auto;
     overscroll-behavior: contain;
   }
@@ -3929,7 +3964,7 @@ SPDX-License-Identifier: Apache-2.0
     }
 
     .dropdown-panel {
-      max-height: min(360px, calc(100vh - 200px));
+      max-height: min(360px, var(--dropdown-max-h, calc(100vh - 200px)));
     }
 
     .model-picker,

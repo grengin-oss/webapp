@@ -2059,6 +2059,13 @@ SPDX-License-Identifier: Apache-2.0
     align-self: stretch;
     padding: 60px 40px 40px;
     overflow-y: auto;
+    /* A flex item defaults to min-width:auto, which pinned this column to its
+       content's min-content width — the 720px measure plus 80px of padding — so
+       the empty state overflowed any viewport narrower than 800px and pushed the
+       third card off-screen. */
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
   }
 
   .welcome-hero {
@@ -2186,10 +2193,12 @@ SPDX-License-Identifier: Apache-2.0
     align-self: stretch;
   }
 
-  /* composer column and cards row are both 720px wide in the design */
+  /* Composer column and cards row share the design's 720px measure. Expressed as
+     `width:100%; max-width:720px` rather than the reverse so neither can demand
+     more width than the column actually has. */
   .input-section {
-    width: 720px;
-    max-width: 100%;
+    width: 100%;
+    max-width: 720px;
     display: flex;
     flex-direction: column;
     gap: 8px;
@@ -2208,16 +2217,18 @@ SPDX-License-Identifier: Apache-2.0
   }
 
   .cards-row {
-    width: 720px;
-    max-width: 100%;
-    display: flex;
+    width: 100%;
+    max-width: 720px;
+    /* auto-fit + minmax reflows 3 -> 2 -> 1 at whatever width the column has,
+       keeping every card the same size (a wrapping flex row would stretch a lone
+       card on the last line) and equal height per row. */
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px;
-    align-items: flex-start;
-    flex-shrink: 0;
+    align-items: stretch;
   }
 
   .sug-card {
-    flex: 1 1 0;
     min-width: 0;
     min-height: 143px;
     display: flex;
@@ -2550,13 +2561,10 @@ SPDX-License-Identifier: Apache-2.0
       height: 24px;
     }
 
-    .cards-row {
-      flex-direction: column;
-    }
-
+    /* The grid already reflows; on small screens just let the cards shrink to
+       their content instead of holding the design's 143px card height. */
     .sug-card {
       min-height: 0;
-      width: 100%;
     }
 
     .input-container {
