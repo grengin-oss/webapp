@@ -626,7 +626,7 @@ SPDX-License-Identifier: Apache-2.0
               {@render alertsUi()}
             </div>
             <button
-              class="ch-action-btn ch-action-btn--flip"
+              class="ch-action-btn"
               onclick={toggleSidebar}
               aria-label={$_("sidebar.toggleSidebar")}
               title={$_("sidebar.toggleSidebar")}
@@ -659,7 +659,7 @@ SPDX-License-Identifier: Apache-2.0
           {@render backChevron()}
         </button>
         <button
-          class="ch-rail-btn"
+          class="ch-rail-btn ch-rail-btn--flip"
           onclick={toggleSidebar}
           aria-label={$_("sidebar.expandSidebar")}
           title={$_("sidebar.expandSidebar")}
@@ -729,7 +729,7 @@ SPDX-License-Identifier: Apache-2.0
               {@render alertsUi()}
             </div>
             <button
-              class="action-btn action-btn--flip"
+              class="action-btn"
               onclick={toggleSidebar}
               aria-label={$_("sidebar.toggleSidebar")}
               title={$_("sidebar.toggleSidebar")}
@@ -766,7 +766,7 @@ SPDX-License-Identifier: Apache-2.0
         </div>
         <div class="rail-spacer" aria-hidden="true"></div>
         <button
-          class="rail-btn"
+          class="rail-btn rail-btn--flip"
           onclick={toggleSidebar}
           aria-label={$_("sidebar.expandSidebar")}
           title={$_("sidebar.expandSidebar")}
@@ -1110,9 +1110,18 @@ SPDX-License-Identifier: Apache-2.0
     outline-offset: 2px;
   }
 
-  .ch-action-btn--flip,
-  .ch-action-btn--flip:hover,
-  .ch-action-btn--flip:active {
+  /* panelIcon carries a directional chevron, so the mirror belongs on the
+     COLLAPSED trigger: pointing right = "this will expand". The expanded trigger
+     uses the icon as drawn (chevron left = "this will collapse"). The design's
+     own glyph was symmetrical, which is why its --flip sat on the other one. */
+  /* Doubled class on purpose: `.rail-btn:hover { transform: none }` lives further
+     down this stylesheet and app.css sets `button:hover { transform: … }`, both of
+     which would otherwise beat a single-class flip on hover and drop the mirror —
+     the icon appeared to change direction under the cursor. (0,3,0) outranks both. */
+  .ch-rail-btn.ch-rail-btn--flip,
+  .ch-rail-btn.ch-rail-btn--flip:hover,
+  .ch-rail-btn.ch-rail-btn--flip:active,
+  .ch-rail-btn.ch-rail-btn--flip:focus-visible {
     transform: scaleX(-1);
   }
 
@@ -1289,9 +1298,10 @@ SPDX-License-Identifier: Apache-2.0
   }
 
   /* the panel glyph is mirrored so the caret points the way the panel moves */
-  .action-btn--flip,
-  .action-btn--flip:hover,
-  .action-btn--flip:active {
+  .rail-btn.rail-btn--flip,
+  .rail-btn.rail-btn--flip:hover,
+  .rail-btn.rail-btn--flip:active,
+  .rail-btn.rail-btn--flip:focus-visible {
     transform: scaleX(-1);
   }
 
