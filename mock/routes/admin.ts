@@ -14,6 +14,8 @@ import {
 } from '../lib/store.js'
 import dashboardExample from '../examples/admin/dashboard.response.json' with { type: 'json' }
 import usersListExample from '../examples/admin/users-list.response.json' with { type: 'json' }
+import rolesListExample from '../examples/admin/roles-list.response.json' with { type: 'json' }
+import permissionsListExample from '../examples/admin/permissions-list.response.json' with { type: 'json' }
 import organizationExample from '../examples/admin/organization.response.json' with { type: 'json' }
 
 const router = Router()
@@ -57,6 +59,30 @@ router.get('/admin/users', requireAuth, (req, res) => {
     result = { ...usersListExample, users }
   }
   
+  // RolesTab lists the users of one role, paginated — so role_id/limit/offset
+  // have to be honoured or every role shows the same full list.
+  const { role_id, limit, offset } = req.query
+  if (role_id) {
+    const role = roles.find((r) => r.id === role_id)
+    const wanted = role?.user_count ?? 0
+    const pool = result.users
+    const users = Array.from({ length: wanted }, (_, i) => {
+      const base = pool[i % pool.length]
+      return {
+        ...base,
+        id: `${role_id}-u${i + 1}`,
+        name: `${base.name} ${i + 1}`,
+        email: base.email.replace('@', `+${role_id}${i + 1}@`),
+      }
+    })
+    const start = Number(offset ?? 0)
+    const size = Number(limit ?? users.length)
+    return res.json({
+      users: users.slice(start, start + size),
+      total: users.length,
+    })
+  }
+
   res.json(result)
 })
 
@@ -566,6 +592,69 @@ router.delete('/admin/departments/:departmentId/members', requireAuth, (req, res
 })
 
 // Organization
+// ===== Access Control: roles + permissions =====
+// Kept in a module-level array so create/update/delete are visible to the next
+// GET, which is what the page does after every mutation.
+const roles = [...rolesListExample.roles]
+
+router.get('/admin/permissions', requireAuth, (_req, res) => {
+  res.json(permissionsListExample)
+})
+
+router.get('/admin/roles', requireAuth, (_req, res) => {
+  res.json({ roles })
+})
+
+router.get('/admin/role/:roleId', requireAuth, (req, res) => {
+  const role = roles.find((r) => r.id === req.params.roleId)
+  if (!role) return res.status(404).json({ detail: 'Role not found' })
+  res.json(role)
+})
+
+router.post('/admin/roles', requireAuth, (req, res) => {
+  const role = {
+    id: `r-${crypto.randomUUID().slice(0, 8)}`,
+    name: req.body?.name ?? 'New role',
+    is_system: false,
+    user_count: 0,
+    permissions: req.body?.permissions ?? [],
+  }
+  roles.unshift(role)
+  res.status(201).json(role)
+})
+
+router.put('/admin/roles/:roleId', requireAuth, (req, res) => {
+  const index = roles.findIndex((r) => r.id === req.params.roleId)
+  if (index === -1) return res.status(404).json({ detail: 'Role not found' })
+  roles[index] = {
+    ...roles[index],
+    name: req.body?.name ?? roles[index].name,
+    permissions: req.body?.permissions ?? roles[index].permissions,
+  }
+  res.json(roles[index])
+})
+
+router.delete('/admin/roles/:roleId', requireAuth, (req, res) => {
+  const index = roles.findIndex((r) => r.id === req.params.roleId)
+  if (index === -1) return res.status(404).json({ detail: 'Role not found' })
+  // Mirrors the UI's own rule (see canDeleteRole): everything except Super Admin
+  // is deletable. The blanket system-role refusal here was an assumption, and it
+  // made the newly enabled buttons untestable locally.
+  if (roles[index].name === 'Super Admin') {
+    return res.status(403).json({ detail: 'Super Admin cannot be deleted' })
+  }
+  roles.splice(index, 1)
+  res.status(204).send()
+})
+
+router.post('/admin/users/:userId/roles', requireAuth, (_req, res) => {
+  res.status(204).send()
+})
+
+router.delete('/admin/users/:userId/roles/:roleId', requireAuth, (_req, res) => {
+  res.status(204).send()
+})
+
 router.get('/admin/organization', requireAuth, (req, res) => {
   res.json(organizationExample)
 })

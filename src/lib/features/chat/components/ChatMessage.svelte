@@ -145,7 +145,9 @@ SPDX-License-Identifier: Apache-2.0
    * registry has no icon for this message's provider.
    */
   const providerLetter = $derived(
-    (messageProvider?.name || messageProvider?.key || '?').charAt(0).toUpperCase(),
+    (messageProvider?.name || messageProvider?.key || "?")
+      .charAt(0)
+      .toUpperCase(),
   );
 
   let renderedContent = $state("");
@@ -1022,7 +1024,6 @@ SPDX-License-Identifier: Apache-2.0
       {@render attachmentGrid(assistantOtherFiles)}
     {/if}
   </div>
-
 {/snippet}
 
 <div
@@ -1355,7 +1356,6 @@ SPDX-License-Identifier: Apache-2.0
     width: 36px;
     height: 36px;
     border-radius: 8px;
-    background: var(--gx-tx-logo-bg);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1382,18 +1382,16 @@ SPDX-License-Identifier: Apache-2.0
      (Google's four-colour G) monochrome, which is consistent with the design's
      monochrome tile and its white letter fallback. */
   .conv-ai-logo :global(svg) {
-    width: 18px;
-    height: 18px;
+    width: 36px;
+    height: 36px;
     display: block;
-    filter: brightness(0) invert(1);
   }
 
   .conv-ai-logo .provider-icon-img {
-    width: 18px;
-    height: 18px;
+    width: 36px;
+    height: 36px;
     display: block;
     object-fit: contain;
-    filter: brightness(0) invert(1);
   }
 
   .message-content {

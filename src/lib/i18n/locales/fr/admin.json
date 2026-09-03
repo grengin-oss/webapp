@@ -471,13 +471,30 @@
         "noPermissionsDescription": "Aucune permission n’a été configurée dans le système.",
         "columns": {
           "action": "Opération",
-          "scope": "Portée"
+          "scope": "Portée",
+          "permission": "Autorisation",
+          "description": "Description"
         },
         "scopeableBadge": "Limitable",
         "scopeableBadgeTitle": "Peut être limité à des départements",
         "globalBadge": "Général",
         "domainCount": "{count} autorisations"
-      }
+      },
+      "roleCount": "{count} rôles",
+      "permissionCount": "{count} autorisations",
+      "viewGrid": "Grille",
+      "viewList": "Liste",
+      "viewModeLabel": "Mode d’affichage",
+      "searchRoles": "Rechercher des rôles...",
+      "searchPermissions": "Rechercher des autorisations...",
+      "noSearchResults": "Aucun résultat pour « {query} ».",
+      "customRoleLabel": "Rôle personnalisé",
+      "noUsersAssigned": "Aucun utilisateur attribué",
+      "showMoreUsers": "Afficher {count} de plus →",
+      "morePermissions": "+ {count} de plus",
+      "usersStatLabel": "Utilisateurs",
+      "showLess": "Afficher moins",
+      "footerSummary": "{count} autorisations sélectionnées dans {categories} catégories"
     },
     "mcpServers": {
       "title": "Serveurs MCP",

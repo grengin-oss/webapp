@@ -27,10 +27,41 @@ SPDX-License-Identifier: Apache-2.0
     roles: Role[];
     permissions: Permission[];
     loading: boolean;
+    /** ".layout-toggles" choice, owned by the page. */
+    view?: "list" | "grid";
+    /** Lets a card switch the page back to the list view. */
+    onViewChange?: (view: "list" | "grid") => void;
     onRolesChange: () => void;
   }
 
-  let { roles, permissions, loading, onRolesChange }: Props = $props();
+  let {
+    roles,
+    permissions,
+    loading,
+    view = "list",
+    onViewChange,
+    onRolesChange,
+  }: Props = $props();
+
+  /**
+   * ".role-card__footer" — the design puts "Manage scoping" here, but scoping is
+   * per user-role assignment (DepartmentScopingModal needs BOTH a role and a
+   * user) and a card has no single user. So the card opens that role in the list
+   * view, where every user row carries its own scoping control.
+   */
+  function manageScopingFromCard(role: Role) {
+    if (!canAssignRoles) return;
+    expandedRoles = { ...expandedRoles, [role.id]: true };
+    onViewChange?.("list");
+  }
+
+  /**
+   * The design puts "Add New Roles" in the page header, but this component still
+   * owns the modal and its state — so the header drives it through here.
+   */
+  export function openAddRole() {
+    roleFormOpen = "add";
+  }
   const canManageRoles = $derived(permissionsStore.canManageRoles());
   const canAssignRoles = $derived(permissionsStore.canAssignRoles());
 
@@ -41,13 +72,21 @@ SPDX-License-Identifier: Apache-2.0
     }),
   );
 
+  // ".roles-search" — the grid view carries its own search in the design.
+  let gridQuery = $state("");
+  const gridRoles = $derived.by(() => {
+    const q = gridQuery.trim().toLowerCase();
+    if (!q) return sortedRoles;
+    return sortedRoles.filter((role) => role.name.toLowerCase().includes(q));
+  });
+
   let roleFormOpen = $state<"add" | Role | null>(null);
   let roleToDelete = $state<Role | null>(null);
   let deletingRole = $state(false);
 
-  // Collapsible sections per role: users and permissions (both collapsed by default)
-  let expandedUsersSections = $state<Record<string, boolean>>({});
-  let expandedPermsSections = $state<Record<string, boolean>>({});
+  // ".role-panel[data-open]" — the design gives each role ONE accordion that
+  // reveals its users and its permissions together, so a single map drives both.
+  let expandedRoles = $state<Record<string, boolean>>({});
 
   const PAGE_SIZE = 10;
 
@@ -97,6 +136,63 @@ SPDX-License-Identifier: Apache-2.0
     }
   }
 
+  function roleInitials(name: string): string {
+    const parts = name.trim().split(/\s+/).filter(Boolean);
+    if (parts.length === 0) return "?";
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  /**
+   * The design gives each role a differently tinted avatar. Derive the tint from
+   * the role id so it is stable across renders, reloads and reorders rather than
+   * shifting with list position.
+   */
+  const AVATAR_TINT_COUNT = 5;
+  function roleTint(roleId: string): number {
+    let hash = 0;
+    for (let i = 0; i < roleId.length; i += 1) {
+      hash = (hash * 31 + roleId.charCodeAt(i)) >>> 0;
+    }
+    return hash % AVATAR_TINT_COUNT;
+  }
+
+  /**
+   * ".avatars-stack" — the card shows real faces, so the grid needs a page of
+   * users per role. The accordion loads them lazily on expand; in grid view every
+   * visible card needs them at once, so fetch the ones not already cached.
+   */
+  const AVATAR_LIMIT = 3;
+  $effect(() => {
+    if (view !== "grid") return;
+    for (const role of gridRoles) {
+      if ((role.user_count ?? 0) > 0 && !(role.id in roleUsers)) {
+        loadRoleUsers(role.id, 1);
+      }
+    }
+  });
+
+  /** ".role-card__tags" — the domains a role touches, deduped and ordered. */
+  const GRID_TAG_LIMIT = 2;
+  function roleDomains(role: Role): string[] {
+    return Object.keys(getRolePermissionsByDomain(role));
+  }
+
+  /**
+   * ".perm-card-more" — the design caps the permission cards and closes the row
+   * with a "+ N MORE" chip. Here that chip is a real toggle so the rest is
+   * reachable, and it collapses again.
+   */
+  const PERM_CARD_LIMIT = 4;
+  let expandedPermCards = $state<Record<string, boolean>>({});
+
+  function togglePermCards(roleId: string) {
+    expandedPermCards = {
+      ...expandedPermCards,
+      [roleId]: !(expandedPermCards[roleId] ?? false),
+    };
+  }
+
   function getRoleTotalPages(roleId: string): number {
     const total = roleUsersTotal[roleId] ?? 0;
     return Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -118,12 +214,25 @@ SPDX-License-Identifier: Apache-2.0
     return role.name === "Super Admin";
   }
 
+  /**
+   * A system role IS editable: RoleFormModal already has dedicated branches for
+   * one — it locks the name input and shows the systemRoleNameLocked hint — which
+   * only makes sense if such a role can be opened there. Its permissions are the
+   * editable part. Super Admin stays excluded: stripping permissions from it can
+   * lock every administrator out of this page.
+   */
   function canEditRole(role: Role): boolean {
-    return !isSuperAdmin(role) && !role.is_system;
+    return !isSuperAdmin(role);
   }
 
+  /**
+   * Delete is offered on system roles too. Super Admin remains the one exception:
+   * it is the only role granting roles:manage, so removing it locks every
+   * administrator out of this page for good. If the backend refuses a particular
+   * deletion, handleDeleteRole surfaces the server's own message.
+   */
   function canDeleteRole(role: Role): boolean {
-    return !isSuperAdmin(role) && !role.is_system;
+    return !isSuperAdmin(role);
   }
 
   function openEditRole(role: Role) {
@@ -133,7 +242,7 @@ SPDX-License-Identifier: Apache-2.0
 
   // Load role users when users section is expanded
   $effect(() => {
-    const sections = expandedUsersSections;
+    const sections = expandedRoles;
     for (const r of sortedRoles) {
       if ((sections[r.id] ?? false) && !(r.id in roleUsers)) {
         loadRoleUsers(r.id, 1);
@@ -141,11 +250,11 @@ SPDX-License-Identifier: Apache-2.0
     }
   });
 
-  function toggleUsersSection(roleId: string, e: Event) {
+  function toggleRole(roleId: string, e: Event) {
     e.stopPropagation();
-    const wasExpanded = expandedUsersSections[roleId] ?? false;
-    expandedUsersSections = {
-      ...expandedUsersSections,
+    const wasExpanded = expandedRoles[roleId] ?? false;
+    expandedRoles = {
+      ...expandedRoles,
       [roleId]: !wasExpanded,
     };
     if (wasExpanded && showAddUserSearch === roleId) {
@@ -153,20 +262,8 @@ SPDX-License-Identifier: Apache-2.0
     }
   }
 
-  function togglePermsSection(roleId: string, e: Event) {
-    e.stopPropagation();
-    expandedPermsSections = {
-      ...expandedPermsSections,
-      [roleId]: !(expandedPermsSections[roleId] ?? false),
-    };
-  }
-
-  function isUsersExpanded(roleId: string): boolean {
-    return expandedUsersSections[roleId] ?? false;
-  }
-
-  function isPermsExpanded(roleId: string): boolean {
-    return expandedPermsSections[roleId] ?? false;
+  function isRoleExpanded(roleId: string): boolean {
+    return expandedRoles[roleId] ?? false;
   }
 
   function toggleAddUserSearch(roleId: string) {
@@ -183,7 +280,7 @@ SPDX-License-Identifier: Apache-2.0
 
   function openAddUser(roleId: string) {
     if (!canAssignRoles) return;
-    expandedUsersSections = { ...expandedUsersSections, [roleId]: true };
+    expandedRoles = { ...expandedRoles, [roleId]: true };
     toggleAddUserSearch(roleId);
   }
 
@@ -354,6 +451,331 @@ SPDX-License-Identifier: Apache-2.0
   }
 </script>
 
+{#snippet roleBadge(role: Role)}
+  <span
+    class="badge"
+    class:badge--system={role.is_system}
+    class:badge--custom={!role.is_system}
+  >
+    {role.is_system
+      ? $_("admin.accessControl.systemRoleLabel")
+      : $_("admin.accessControl.customRoleLabel")}
+  </span>
+{/snippet}
+
+<!--
+  The role's own controls. The design's head only draws "+ Add user", but edit and
+  delete must not disappear with the restyle — they keep their existing gates and
+  sit alongside it as labelled icon buttons.
+-->
+{#snippet roleControls(role: Role)}
+  {#if canAssignRoles}
+    <button
+      class="add-user-btn"
+      type="button"
+      onclick={(e) => {
+        e.stopPropagation();
+        openAddUser(role.id);
+      }}
+      title={$_("admin.accessControl.addUser")}
+    >
+      + {$_("admin.accessControl.addUser")}
+    </button>
+  {/if}
+  {@render roleEditControls(role)}
+{/snippet}
+
+{#snippet roleEditControls(role: Role)}
+  {#if canManageRoles && canEditRole(role)}
+    <button
+      class="icon-btn icon-btn--labeled"
+      type="button"
+      onclick={(e) => {
+        e.stopPropagation();
+        openEditRole(role);
+      }}
+      title={$_("admin.accessControl.editRole")}
+      aria-label={$_("admin.accessControl.editRole")}
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        aria-hidden="true"
+      >
+        <path
+          d="M11.5 2.5a1.5 1.5 0 0 1 2.12 2.12L5 11.25v2.25h2.25l6.62-6.62a1.5 1.5 0 0 0-2.12-2.12L5.25 11"
+        />
+      </svg>
+      <span>{$_("common.edit")}</span>
+    </button>
+  {/if}
+  {#if canManageRoles && canDeleteRole(role)}
+    <button
+      class="icon-btn icon-btn--labeled icon-btn--danger"
+      type="button"
+      onclick={(e) => {
+        e.stopPropagation();
+        roleToDelete = role;
+      }}
+      title={$_("admin.accessControl.deleteRole")}
+      aria-label={$_("admin.accessControl.deleteRole")}
+    >
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.5"
+        aria-hidden="true"
+      >
+        <path
+          d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1m2 0v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4h10z"
+        />
+        <path d="M6 7v4M10 7v4" />
+      </svg>
+      <span>{$_("common.delete")}</span>
+    </button>
+  {/if}
+{/snippet}
+
+<!-- ".users-section" — the add-user search, the rows, and real pagination. -->
+{#snippet usersSection(role: Role)}
+  <div class="users-section">
+    <span class="section-label">{$_("admin.accessControl.usersWithRole")}</span>
+
+    {#if showAddUserSearch === role.id}
+      <div class="user-search-wrapper">
+        <div class="user-search-box">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+          >
+            <circle
+              cx="7"
+              cy="7"
+              r="4.5"
+              stroke="currentColor"
+              stroke-width="1.3"
+            />
+            <path d="m13 13-2.5-2.5" stroke="currentColor" stroke-width="1.3" />
+          </svg>
+          <input
+            type="text"
+            class="user-search-input"
+            placeholder={$_("admin.accessControl.searchUsersToAdd")}
+            bind:value={addUserSearchQuery}
+            bind:this={searchInputRef}
+            oninput={handleAddUserSearchInput}
+            onkeydown={(event) => handleAddUserSearchKeydown(event, role.id)}
+          />
+          <button
+            class="search-close-btn"
+            type="button"
+            onclick={() => toggleAddUserSearch(role.id)}
+            aria-label={$_("admin.accessControl.closeSearch")}
+          >
+            <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M12 4L4 12M4 4L12 12"
+                stroke="currentColor"
+                stroke-width="1.5"
+                stroke-linecap="round"
+              />
+            </svg>
+          </button>
+        </div>
+
+        {#if addUserSearching}
+          <div class="user-search-dropdown">
+            <div class="search-loading"><LoadingSpinner /></div>
+          </div>
+        {:else if addUserSearchQuery && addUserSearchResults.length > 0}
+          <div class="user-search-dropdown">
+            {#each addUserSearchResults as user (user.id)}
+              <button
+                class="search-result-item"
+                type="button"
+                onclick={() => handleAddUser(user)}
+                disabled={addingUserId !== null}
+              >
+                <span class="avatar-round" aria-hidden="true"
+                  >{roleInitials(user.name || user.email || "?")}</span
+                >
+                <span class="search-result-text">
+                  <span class="user-row-mini__name"
+                    >{user.name || user.email}</span
+                  >
+                  <span class="user-row-mini__email">{user.email}</span>
+                </span>
+                {#if addingUserId === user.id}
+                  <span class="adding-spinner"><LoadingSpinner /></span>
+                {:else}
+                  <span class="add-glyph" aria-hidden="true">
+                    <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+                      <path
+                        d="M8 3V13M3 8H13"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                      />
+                    </svg>
+                  </span>
+                {/if}
+              </button>
+            {/each}
+          </div>
+        {:else if addUserSearchQuery && addUserSearchResults.length === 0}
+          <div class="user-search-dropdown">
+            <div class="no-results">
+              {$_("admin.accessControl.noUsersFound")}
+            </div>
+          </div>
+        {/if}
+      </div>
+    {/if}
+
+    {#if roleUsersLoading[role.id] && (roleUsers[role.id] ?? []).length === 0}
+      <div class="section-state"><LoadingSpinner /></div>
+    {:else if (roleUsers[role.id] ?? []).length === 0}
+      <div class="section-state">{$_("admin.accessControl.noUsersInRole")}</div>
+    {:else}
+      {#each roleUsers[role.id] ?? [] as user (user.id)}
+        <div class="user-row-mini">
+          <div class="user-row-mini__left">
+            <span class="avatar-round" aria-hidden="true"
+              >{roleInitials(user.name || user.email || "?")}</span
+            >
+            <div class="user-row-mini__text">
+              <div class="user-row-mini__name">
+                {user.name || user.email}
+                {#if user.status && user.status !== "active"}
+                  <span class="status-capsule"
+                    >{$_("admin.common.deactivated")}</span
+                  >
+                {/if}
+              </div>
+              <div class="user-row-mini__email">{user.email}</div>
+            </div>
+          </div>
+          {#if canAssignRoles}
+            <div class="user-row-mini__actions">
+              <button
+                class="link-btn"
+                type="button"
+                onclick={() => openDepartmentModal(role, user)}
+              >
+                {$_("admin.accessControl.manageScoping")}
+              </button>
+              <button
+                class="link-btn link-btn--danger"
+                type="button"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  confirmRemoveUser(user, role.id);
+                }}
+              >
+                {$_("admin.accessControl.removeUser")}
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/each}
+
+      <!--
+        The design shows a single "Show N more" link, but this list is genuinely
+        paginated by the API, so both directions stay reachable.
+      -->
+      {#if (roleUsersTotal[role.id] ?? 0) > PAGE_SIZE}
+        <div class="users-pagination">
+          <button
+            class="link-btn"
+            type="button"
+            onclick={(e) => {
+              e.stopPropagation();
+              loadRoleUsers(role.id, (roleUsersPage[role.id] ?? 1) - 1);
+            }}
+            disabled={(roleUsersPage[role.id] ?? 1) <= 1 ||
+              roleUsersLoading[role.id]}
+          >
+            {$_("admin.common.previous")}
+          </button>
+          <span class="pagination-info">
+            {$_("admin.common.pageInfo", {
+              values: {
+                current: roleUsersPage[role.id] ?? 1,
+                total: getRoleTotalPages(role.id),
+                count: roleUsersTotal[role.id] ?? 0,
+              },
+            })}
+          </span>
+          <button
+            class="link-btn"
+            type="button"
+            onclick={(e) => {
+              e.stopPropagation();
+              loadRoleUsers(role.id, (roleUsersPage[role.id] ?? 1) + 1);
+            }}
+            disabled={(roleUsersPage[role.id] ?? 1) >=
+              getRoleTotalPages(role.id) || roleUsersLoading[role.id]}
+          >
+            {$_("admin.common.next")}
+          </button>
+        </div>
+      {/if}
+    {/if}
+  </div>
+{/snippet}
+
+<!-- ".perms-section" — one ".perm-card" per domain, listing that domain's actions. -->
+{#snippet permsSection(role: Role)}
+  <div class="perms-section">
+    <span class="section-label"
+      >{$_("admin.accessControl.permissionsInRole")}</span
+    >
+    {#if role.permissions.length === 0}
+      <div class="section-state">
+        {$_("admin.accessControl.noPermissionsInRole")}
+      </div>
+    {:else}
+      {@const entries = Object.entries(getRolePermissionsByDomain(role))}
+      {@const showAll = expandedPermCards[role.id] ?? false}
+      {@const shown = showAll ? entries : entries.slice(0, PERM_CARD_LIMIT)}
+      <div class="perm-row-wrap">
+        {#each shown as [domain, actions] (domain)}
+          <div class="perm-card">
+            <span class="perm-card__cat">{formatDomain(domain)}</span>
+            <span class="perm-card__actions">
+              {actions.map((action) => formatAction(action)).join("  ")}
+            </span>
+          </div>
+        {/each}
+        {#if entries.length > PERM_CARD_LIMIT}
+          <button
+            class="perm-card-more"
+            type="button"
+            onclick={() => togglePermCards(role.id)}
+            aria-expanded={showAll}
+          >
+            {showAll
+              ? $_("admin.accessControl.showLess")
+              : $_("admin.accessControl.morePermissions", {
+                  values: { count: entries.length - PERM_CARD_LIMIT },
+                })}
+          </button>
+        {/if}
+      </div>
+    {/if}
+  </div>
+{/snippet}
+
 {#if loading}
   <LoadingSpinner text={$_("admin.accessControl.loadingRoles")} />
 {:else if roles.length === 0}
@@ -361,420 +783,212 @@ SPDX-License-Identifier: Apache-2.0
     title={$_("admin.accessControl.noRolesTitle")}
     message={$_("admin.accessControl.noRolesMessage")}
   />
+{:else if view === "list"}
+  <!-- ".roles-list": an accordion per role -->
+  <div class="roles-list">
+    {#each sortedRoles as role (role.id)}
+      {@const open = isRoleExpanded(role.id)}
+      <div class="role-panel" class:role-panel--open={open}>
+        <div class="role-panel__head">
+          <div class="role-panel__left">
+            <button
+              class="chev-btn"
+              type="button"
+              onclick={(e) => toggleRole(role.id, e)}
+              aria-expanded={open}
+              aria-label={role.name}
+            >
+              <svg
+                width="16"
+                height="16"
+                viewBox="0 0 16 16"
+                fill="none"
+                aria-hidden="true"
+              >
+                <path
+                  d="M4 6l4 4 4-4"
+                  stroke="currentColor"
+                  stroke-width="1.4"
+                  fill="none"
+                />
+              </svg>
+            </button>
+            <span
+              class="avatar-round role-panel-avatar"
+              data-tint={roleTint(role.id)}
+              aria-hidden="true">{roleInitials(role.name)}</span
+            >
+            <span class="role-name">{role.name}</span>
+            {@render roleBadge(role)}
+          </div>
+          <div class="role-panel__right">
+            <div class="stat">
+              <span class="stat__value">{role.user_count ?? 0}</span>
+              <span class="stat__label"
+                >{$_("admin.accessControl.usersStatLabel")}</span
+              >
+            </div>
+            <div class="stat">
+              <span class="stat__value">{role.permissions.length}</span>
+              <span class="stat__label"
+                >{$_("admin.accessControl.permissionsLabel")}</span
+              >
+            </div>
+            {@render roleControls(role)}
+          </div>
+        </div>
+
+        {#if open}
+          <div class="role-panel__body">
+            {@render usersSection(role)}
+            {@render permsSection(role)}
+          </div>
+        {/if}
+      </div>
+    {/each}
+  </div>
 {:else}
-  <div class="roles-tab">
-    {#if canManageRoles}
-      <div class="roles-header">
-        <button
-          class="btn-add-role btn-primary"
-          onclick={() => (roleFormOpen = "add")}
-        >
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 14 14"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M7 3v8M3 7h8"
-              stroke="currentColor"
-              stroke-width="1.5"
-              stroke-linecap="round"
-            />
-          </svg>
-          {$_("admin.accessControl.addRoleButton")}
-        </button>
+  <!-- ".roles-grid-wrap": a card per role, with its own search -->
+  <div class="roles-grid-wrap">
+    <div class="search-row roles-search">
+      <svg
+        width="16"
+        height="16"
+        viewBox="0 0 16 16"
+        fill="none"
+        aria-hidden="true"
+      >
+        <circle
+          cx="7"
+          cy="7"
+          r="4.5"
+          stroke="currentColor"
+          stroke-width="1.3"
+        />
+        <path d="m13 13-2.5-2.5" stroke="currentColor" stroke-width="1.3" />
+      </svg>
+      <input
+        type="text"
+        bind:value={gridQuery}
+        placeholder={$_("admin.accessControl.searchRoles")}
+        aria-label={$_("admin.accessControl.searchRoles")}
+      />
+    </div>
+
+    {#if gridRoles.length === 0}
+      <AdminEmptyState
+        title={$_("admin.accessControl.noRolesTitle")}
+        message={$_("admin.accessControl.noSearchResults", {
+          values: { query: gridQuery.trim() },
+        })}
+      />
+    {:else}
+      <div class="roles-grid">
+        {#each gridRoles as role (role.id)}
+          {@const domains = roleDomains(role)}
+          <div class="role-card">
+            <div class="role-card__top">
+              <div class="role-card__title-row">
+                <div class="role-card__title-left">
+                  <span
+                    class="avatar-round"
+                    data-tint={roleTint(role.id)}
+                    aria-hidden="true">{roleInitials(role.name)}</span
+                  >
+                  <span class="role-card__name">{role.name}</span>
+                </div>
+                {@render roleBadge(role)}
+              </div>
+              <!--
+                Figma 355:29939 — a caption under the title. The design's own
+                copy is the role type ("Custom role"), which is the only
+                description the API actually carries, so that is what it shows.
+              -->
+              <span class="role-card__desc">
+                {role.is_system
+                  ? $_("admin.accessControl.systemRoleLabel")
+                  : $_("admin.accessControl.customRoleLabel")}
+              </span>
+              <div class="role-card__stats">
+                <div class="stat stat--left">
+                  <span class="stat__value">{role.user_count ?? 0}</span>
+                  <span class="stat__label"
+                    >{$_("admin.accessControl.usersStatLabel")}</span
+                  >
+                </div>
+                <div class="stat stat--left">
+                  <span class="stat__value">{role.permissions.length}</span>
+                  <span class="stat__label"
+                    >{$_("admin.accessControl.permissionsLabel")}</span
+                  >
+                </div>
+              </div>
+              <div class="role-card__tags">
+                {#each domains.slice(0, GRID_TAG_LIMIT) as domain (domain)}
+                  <span class="tag-green">{formatDomain(domain)}</span>
+                {/each}
+                {#if domains.length > GRID_TAG_LIMIT}
+                  <span class="tag-more"
+                    >{$_("admin.accessControl.morePermissions", {
+                      values: { count: domains.length - GRID_TAG_LIMIT },
+                    })}</span
+                  >
+                {/if}
+              </div>
+            </div>
+            <div class="role-card__footer">
+              {#if (role.user_count ?? 0) === 0}
+                <span class="role-card__no-users"
+                  >{$_("admin.accessControl.noUsersAssigned")}</span
+                >
+              {:else}
+                {@const loaded = roleUsers[role.id] ?? []}
+                {@const faces = loaded.slice(0, AVATAR_LIMIT)}
+                {@const overflow = (role.user_count ?? 0) - faces.length}
+                <div
+                  class="avatars-stack"
+                  title={$_("admin.accessControl.userCountLabel", {
+                    values: { count: role.user_count ?? 0 },
+                  })}
+                >
+                  {#each faces as user (user.id)}
+                    <span class="avatar-round" aria-hidden="true"
+                      >{roleInitials(user.name || user.email || "?")}</span
+                    >
+                  {/each}
+                  {#if overflow > 0}
+                    <span
+                      class="avatar-round avatar-round--overflow"
+                      aria-hidden="true">+{overflow}</span
+                    >
+                  {/if}
+                  <span class="sr-only"
+                    >{$_("admin.accessControl.userCountLabel", {
+                      values: { count: role.user_count ?? 0 },
+                    })}</span
+                  >
+                </div>
+              {/if}
+              <div class="role-card__actions">
+                {#if canAssignRoles}
+                  <button
+                    class="link-btn"
+                    type="button"
+                    onclick={() => manageScopingFromCard(role)}
+                    disabled={(role.user_count ?? 0) === 0}
+                    title={(role.user_count ?? 0) === 0
+                      ? $_("admin.accessControl.noUsersAssigned")
+                      : $_("admin.accessControl.manageScoping")}
+                  >
+                    {$_("admin.accessControl.manageScoping")}
+                  </button>
+                {/if}
+              </div>
+            </div>
+          </div>
+        {/each}
       </div>
     {/if}
-
-    <div class="roles-list">
-      {#each sortedRoles as role (role.id)}
-        <AdminPanelCard
-          class={showAddUserSearch === role.id ? "dropdown-open" : ""}
-        >
-          <div class="role-header">
-            <span class="role-name">
-              {role.name}
-              {#if role.is_system}
-                <span class="system-badge">
-                  ({$_("admin.accessControl.systemRoleLabel")})
-                </span>
-              {/if}
-            </span>
-            <span class="user-count">
-              {$_("admin.accessControl.userCountLabel", {
-                values: { count: role.user_count ?? 0 },
-              })}
-            </span>
-            <div class="role-actions">
-              {#if canAssignRoles}
-                <button
-                  type="button"
-                  class="btn-role-action btn-add"
-                  onclick={() => openAddUser(role.id)}
-                  title={$_("admin.accessControl.addUser")}
-                  aria-label={$_("admin.accessControl.addUser")}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    aria-hidden="true"
-                  >
-                    <path d="M8 3v10M3 8h10" stroke-linecap="round" />
-                  </svg>
-                  <span class="btn-role-action-label">{$_("admin.accessControl.addUser")}</span>
-                </button>
-              {/if}
-              {#if canManageRoles && canEditRole(role)}
-                <button
-                  type="button"
-                  class="btn-role-action"
-                  onclick={() => openEditRole(role)}
-                  title={$_("admin.accessControl.editRole")}
-                  aria-label={$_("admin.accessControl.editRole")}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M11.5 2.5a1.5 1.5 0 0 1 2.12 2.12L5 11.25v2.25h2.25l6.62-6.62a1.5 1.5 0 0 0-2.12-2.12L5.25 11"
-                    />
-                  </svg>
-                  <span class="btn-role-action-label">{$_("common.edit")}</span>
-                </button>
-              {/if}
-              {#if canManageRoles && canDeleteRole(role)}
-                <button
-                  type="button"
-                  class="btn-role-action btn-delete"
-                  onclick={() => (roleToDelete = role)}
-                  title={$_("admin.accessControl.deleteRole")}
-                  aria-label={$_("admin.accessControl.deleteRole")}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 16 16"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="1.5"
-                    aria-hidden="true"
-                  >
-                    <path
-                      d="M2 4h12M5 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1m2 0v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V4h10z"
-                    />
-                    <path d="M6 7v4M10 7v4" />
-                  </svg>
-                  <span class="btn-role-action-label">{$_("common.delete")}</span>
-                </button>
-              {/if}
-            </div>
-          </div>
-
-          <div class="role-content">
-            <div class="collapsible-section">
-              <div class="collapsible-header">
-                <button
-                  class="collapsible-toggle"
-                  onclick={(e) => toggleUsersSection(role.id, e)}
-                  aria-expanded={isUsersExpanded(role.id)}
-                >
-                  <span class="collapsible-icon" aria-hidden="true">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path
-                        d="M4.5 3L8 6L4.5 9"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span class="collapsible-label"
-                    >{$_("admin.accessControl.usersWithRole")}</span
-                  >
-                  <span class="collapsible-badge">{role.user_count ?? 0}</span>
-                </button>
-              </div>
-              {#if isUsersExpanded(role.id)}
-                <div class="collapsible-body">
-                  {#if showAddUserSearch === role.id}
-                    <div class="user-search-wrapper">
-                      <div class="user-search-box">
-                        <svg
-                          class="search-icon"
-                          width="18"
-                          height="18"
-                          viewBox="0 0 18 18"
-                          fill="none"
-                        >
-                          <circle
-                            cx="8"
-                            cy="8"
-                            r="5.5"
-                            stroke="currentColor"
-                            stroke-width="1.5"
-                          />
-                          <path
-                            d="M12 12L16 16"
-                            stroke="currentColor"
-                            stroke-width="1.5"
-                            stroke-linecap="round"
-                          />
-                        </svg>
-                        <input
-                          type="text"
-                          class="user-search-input"
-                          placeholder={$_(
-                            "admin.accessControl.searchUsersToAdd",
-                          )}
-                          bind:value={addUserSearchQuery}
-                          bind:this={searchInputRef}
-                          oninput={handleAddUserSearchInput}
-                          onkeydown={(event) =>
-                            handleAddUserSearchKeydown(event, role.id)}
-                        />
-                        <button
-                          class="search-close-btn"
-                          onclick={() => toggleAddUserSearch(role.id)}
-                          aria-label={$_("admin.accessControl.closeSearch")}
-                        >
-                          <svg
-                            width="16"
-                            height="16"
-                            viewBox="0 0 16 16"
-                            fill="none"
-                          >
-                            <path
-                              d="M12 4L4 12M4 4L12 12"
-                              stroke="currentColor"
-                              stroke-width="1.5"
-                              stroke-linecap="round"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-
-                      {#if addUserSearching}
-                        <div class="user-search-dropdown">
-                          <div class="search-loading"><LoadingSpinner /></div>
-                        </div>
-                      {:else if addUserSearchQuery && addUserSearchResults.length > 0}
-                        <div class="user-search-dropdown">
-                          {#each addUserSearchResults as user (user.id)}
-                            <button
-                              class="search-result-item"
-                              onclick={() => handleAddUser(user)}
-                              disabled={addingUserId !== null}
-                            >
-                              <span class="user-avatar" aria-hidden="true"
-                                >{user.name?.charAt(0) ??
-                                  user.email?.charAt(0) ??
-                                  "?"}</span
-                              >
-                              <div class="user-info">
-                                <span class="user-name"
-                                  >{user.name || user.email}</span
-                                >
-                                <span class="user-email">{user.email}</span>
-                              </div>
-                              {#if addingUserId === user.id}
-                                <div class="adding-spinner">
-                                  <LoadingSpinner />
-                                </div>
-                              {:else}
-                                <div class="add-button">
-                                  <svg
-                                    width="16"
-                                    height="16"
-                                    viewBox="0 0 16 16"
-                                    fill="none"
-                                  >
-                                    <path
-                                      d="M8 3V13M3 8H13"
-                                      stroke="currentColor"
-                                      stroke-width="2"
-                                      stroke-linecap="round"
-                                    />
-                                  </svg>
-                                </div>
-                              {/if}
-                            </button>
-                          {/each}
-                        </div>
-                      {:else if addUserSearchQuery && addUserSearchResults.length === 0 && !addUserSearching}
-                        <div class="user-search-dropdown">
-                          <div class="no-results">
-                            <p>{$_("admin.accessControl.noUsersFound")}</p>
-                          </div>
-                        </div>
-                      {/if}
-                    </div>
-                  {/if}
-
-                  {#if roleUsersLoading[role.id] && (roleUsers[role.id] ?? []).length === 0}
-                    <div class="users-loading">
-                      <LoadingSpinner />
-                      <p>{$_("admin.accessControl.loadingUsers")}</p>
-                    </div>
-                  {:else if (roleUsers[role.id] ?? []).length === 0}
-                    <div class="users-empty">
-                      <p>{$_("admin.accessControl.noUsersInRole")}</p>
-                    </div>
-                  {:else}
-                    <ul class="users-list" role="list">
-                      {#each roleUsers[role.id] ?? [] as user (user.id)}
-                        <li class="user-item">
-                          <div class="user-info">
-                            <span class="user-name-row">
-                              <span class="user-name"
-                                >{user.name || user.email}</span
-                              >
-                              {#if user.status && user.status !== "active"}
-                                <span class="status-capsule"
-                                  >{$_("admin.common.deactivated")}</span
-                                >
-                              {/if}
-                            </span>
-                            <span class="user-email">{user.email}</span>
-                          </div>
-                          {#if canAssignRoles}
-                            <div class="user-actions">
-                              <button
-                                class="btn-edit-departments"
-                                onclick={() => openDepartmentModal(role, user)}
-                              >
-                                {$_("admin.accessControl.manageScoping")}
-                              </button>
-                              <button
-                                class="btn-remove-user"
-                                onclick={(e) => {
-                                  e.stopPropagation();
-                                  confirmRemoveUser(user, role.id);
-                                }}
-                              >
-                                {$_("admin.accessControl.removeUser")}
-                              </button>
-                            </div>
-                          {/if}
-                        </li>
-                      {/each}
-                    </ul>
-                    {#if (roleUsersTotal[role.id] ?? 0) > PAGE_SIZE}
-                      <div class="users-pagination">
-                        <button
-                          class="btn-pagination"
-                          onclick={(e) => {
-                            e.stopPropagation();
-                            loadRoleUsers(
-                              role.id,
-                              (roleUsersPage[role.id] ?? 1) - 1,
-                            );
-                          }}
-                          disabled={(roleUsersPage[role.id] ?? 1) <= 1 ||
-                            roleUsersLoading[role.id]}
-                        >
-                          {$_("admin.common.previous")}
-                        </button>
-                        <span class="pagination-info">
-                          {$_("admin.common.pageInfo", {
-                            values: {
-                              current: roleUsersPage[role.id] ?? 1,
-                              total: getRoleTotalPages(role.id),
-                              count: roleUsersTotal[role.id] ?? 0,
-                            },
-                          })}
-                        </span>
-                        <button
-                          class="btn-pagination"
-                          onclick={(e) => {
-                            e.stopPropagation();
-                            loadRoleUsers(
-                              role.id,
-                              (roleUsersPage[role.id] ?? 1) + 1,
-                            );
-                          }}
-                          disabled={(roleUsersPage[role.id] ?? 1) >=
-                            getRoleTotalPages(role.id) ||
-                            roleUsersLoading[role.id]}
-                        >
-                          {$_("admin.common.next")}
-                        </button>
-                      </div>
-                    {/if}
-                  {/if}
-                </div>
-              {/if}
-            </div>
-
-            <div class="collapsible-section">
-              <div class="collapsible-header">
-                <button
-                  class="collapsible-toggle"
-                  onclick={(e) => togglePermsSection(role.id, e)}
-                  aria-expanded={isPermsExpanded(role.id)}
-                >
-                  <span class="collapsible-icon" aria-hidden="true">
-                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                      <path
-                        d="M4.5 3L8 6L4.5 9"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                      />
-                    </svg>
-                  </span>
-                  <span class="collapsible-label"
-                    >{$_("admin.accessControl.permissionsInRole")}</span
-                  >
-                  <span class="collapsible-badge"
-                    >{role.permissions.length}</span
-                  >
-                </button>
-              </div>
-              {#if isPermsExpanded(role.id)}
-                <div class="collapsible-body permissions-body">
-                  {#if role.permissions.length === 0}
-                    <p class="permissions-empty">
-                      {$_("admin.accessControl.noPermissionsInRole")}
-                    </p>
-                  {:else}
-                    <div class="permissions-grid">
-                      {#each Object.entries(getRolePermissionsByDomain(role)) as [domain, actions]}
-                        <div class="perm-domain-block">
-                          <span class="perm-domain-name"
-                            >{formatDomain(domain)}</span
-                          >
-                          <div class="perm-chips">
-                            {#each actions as action}
-                              <span class="perm-chip"
-                                >{formatAction(action)}</span
-                              >
-                            {/each}
-                          </div>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                </div>
-              {/if}
-            </div>
-          </div>
-        </AdminPanelCard>
-      {/each}
-    </div>
   </div>
 {/if}
 
@@ -876,357 +1090,559 @@ SPDX-License-Identifier: Apache-2.0
 />
 
 <style>
-  .roles-tab {
-    width: 100%;
-    min-width: 0;
+  /* ==========================================================================
+     Roles tab — access-control.html. Every colour comes from a --gx-* token so
+     the page follows light/dark like the rest of the admin area; the design's
+     own palette is light-only.
+     ========================================================================== */
+
+  /* Same app.css bare-<button> glass chrome as the modal: clear it on the plain
+     text/icon buttons so they don't each sit in a stray rounded pill. Buttons
+     that set their own box-shadow (.icon-btn, .add-user-btn, .perm-card-more)
+     already replace it and only need the blur cleared. */
+  .link-btn,
+  .chev-btn,
+  .search-close-btn,
+  .search-result-item {
+    box-shadow: none;
+    border-radius: 0;
+  }
+
+  .link-btn,
+  .chev-btn,
+  .search-close-btn,
+  .search-result-item,
+  .icon-btn,
+  .add-user-btn,
+  .perm-card-more {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  /* ---- shared: avatars, badges, stats ---- */
+  .avatar-round {
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-family: var(--gx-font);
+    font-weight: 700;
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
+    background: var(--gx-org-track);
+    color: var(--gx-slate-900);
+  }
+
+  /* Deterministic per-role tint (see roleTint) so a role keeps its colour. */
+  .avatar-round[data-tint="0"] {
+    background: var(--gx-ac-green-bg);
+    color: var(--gx-org-brand-alt);
+  }
+  .avatar-round[data-tint="1"] {
+    background: var(--gx-blue-soft);
+    color: var(--gx-ac-system-fg);
+  }
+  .avatar-round[data-tint="2"] {
+    background: var(--gx-ac-custom-bg);
+    color: var(--gx-ac-custom-fg);
+  }
+  .avatar-round[data-tint="3"] {
+    background: var(--gx-ac-card-avatar-bg);
+    color: var(--gx-ac-card-avatar-fg);
+  }
+  .avatar-round[data-tint="4"] {
+    background: var(--gx-ac-dept-bg);
+    color: var(--gx-ac-dept-fg);
+  }
+
+  .badge {
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 12px;
+    line-height: 100%;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .badge--custom {
+    background: var(--gx-ac-custom-bg);
+    color: var(--gx-ac-custom-fg);
+  }
+
+  .badge--system {
+    background: var(--gx-blue-soft);
+    color: var(--gx-ac-system-fg);
+  }
+
+  .stat {
     display: flex;
     flex-direction: column;
-    gap: var(--space-xl);
-  }
-
-  .roles-header {
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  .btn-add-role {
-    display: inline-flex;
+    gap: 2px;
     align-items: center;
-    gap: var(--space-sm);
-    padding: var(--space-sm) var(--space-lg);
-    font-size: 0.875rem;
+    flex-shrink: 0;
   }
 
+  .stat--left {
+    align-items: flex-start;
+  }
+
+  .stat__value {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 16px;
+    line-height: 100%;
+    color: var(--gx-slate-900);
+    white-space: nowrap;
+  }
+
+  .stat__label {
+    font-family: var(--gx-font);
+    /* Figma type style "UI/XSmall Semi": Inter SemiBold 10. */
+    font-weight: 600;
+    font-size: 10px;
+    line-height: 100%;
+    letter-spacing: 0.5px;
+    color: var(--gx-org-slate-350);
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .section-label {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 11px;
+    line-height: 100%;
+    letter-spacing: 0.5px;
+    color: var(--gx-slate-400);
+    text-transform: uppercase;
+  }
+
+  .section-state {
+    font-family: var(--gx-font);
+    font-size: 13px;
+    color: var(--gx-slate-500);
+    padding: 4px 0;
+  }
+
+  /* ---- ".roles-list": accordion view ---- */
   .roles-list {
     display: flex;
     flex-direction: column;
-    gap: var(--space-md);
-  }
-
-  .role-header {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
+    gap: 12px;
+    align-items: flex-start;
+    align-self: stretch;
     width: 100%;
-    padding: var(--space-md) var(--space-lg);
-    font-size: 0.9375rem;
+    min-width: 0;
   }
 
-  .role-actions {
+  .role-panel {
+    border-radius: 12px;
+    background: var(--gx-card);
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px;
+    align-items: flex-start;
+    align-self: stretch;
+    box-sizing: border-box;
+    min-width: 0;
+  }
+
+  .role-panel__head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    align-self: stretch;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .role-panel__left {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .chev-btn {
+    width: 16px;
+    height: 16px;
+    padding: 0;
+    border: none;
+    background: transparent;
     display: flex;
     align-items: center;
-    gap: var(--space-xs);
-    margin-left: auto;
-  }
-
-  .btn-role-action {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-xs);
-    padding: var(--space-xs) var(--space-sm);
-    font-size: 0.8125rem;
-    font-weight: 500;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: var(--radius-md);
-    color: var(--text-secondary);
+    justify-content: center;
+    color: var(--gx-slate-400);
+    flex-shrink: 0;
     cursor: pointer;
-    transition: all 0.2s ease;
+    /* Closed is the rotated state, so the glyph points at the row it opens. */
+    transform: rotate(-90deg);
+    transition: transform 150ms ease;
   }
 
-  .btn-role-action:hover {
-    background: rgba(255, 255, 255, 0.06);
-    color: var(--text-primary);
-    border-color: rgba(255, 255, 255, 0.18);
+  .role-panel--open .chev-btn {
+    transform: rotate(0deg);
   }
 
-  .btn-role-action.btn-add:hover {
-    background: rgba(var(--brand-green-rgb), 0.1);
-    color: var(--brand-green);
-    border-color: rgba(var(--brand-green-rgb), 0.3);
+  .chev-btn:focus-visible {
+    outline: 2px solid var(--gx-org-primary-500);
+    outline-offset: 2px;
+    border-radius: 4px;
   }
 
-  .btn-role-action.btn-delete:hover {
-    background: rgba(var(--brand-red-rgb), 0.1);
-    color: var(--brand-red);
-    border-color: rgba(var(--brand-red-rgb), 0.3);
-  }
-
-  @media (max-width: 640px) {
-    .btn-role-action-label {
-      display: none;
-    }
-
-    .btn-role-action {
-      gap: 0;
-      padding: var(--space-xs);
-      justify-content: center;
-    }
+  .role-panel-avatar {
+    width: 28px;
+    height: 28px;
+    font-size: 11px;
   }
 
   .role-name {
+    font-family: var(--gx-font);
     font-weight: 600;
-    color: var(--text-primary);
-    flex: 1;
+    font-size: 16px;
+    line-height: 100%;
+    color: var(--gx-slate-900);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
   }
 
-  .system-badge {
-    font-size: 0.6875rem;
-    font-weight: 600;
-    padding: 0.2rem 0.2rem;
-    border-radius: var(--radius-md);
-    background: rgba(var(--glass-tint), 0.08);
-    color: var(--text-secondary);
-    border: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .user-count {
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
-    font-weight: 500;
-  }
-
-  .role-content {
-    padding-top: var(--space-lg);
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  .role-panel__right {
     display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-  }
-
-  .collapsible-section {
-    background: var(--surface-subtle, rgba(255, 255, 255, 0.03));
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: var(--radius-xl);
-    overflow: visible;
-  }
-
-  .collapsible-header {
-    display: flex;
+    gap: 24px;
     align-items: center;
-    justify-content: space-between;
-    gap: var(--space-md);
-    padding: var(--space-md) var(--space-lg);
+    flex-wrap: wrap;
   }
 
-  .collapsible-toggle {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-    flex: 1;
-    padding: 0.5rem;
-    background: transparent;
+  .add-user-btn {
+    height: 32px;
     border: none;
-    color: inherit;
-    font: inherit;
+    border-radius: 8px;
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
+    display: flex;
+    padding: 8px 12px;
+    align-items: center;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gx-slate-900);
+    white-space: nowrap;
     cursor: pointer;
-    text-align: left;
-    transition: background 0.2s ease;
-    border-radius: var(--radius-md);
+    transition: background-color 120ms ease;
   }
 
-  .collapsible-toggle:hover {
-    background: rgba(255, 255, 255, 0.04);
+  .add-user-btn:hover {
+    background: var(--gx-org-track);
   }
 
-  .collapsible-icon {
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 8px;
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 20px;
-    height: 20px;
-    color: var(--text-secondary);
-    transition: transform 0.2s ease;
+    color: var(--gx-slate-500);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition:
+      background-color 120ms ease,
+      color 120ms ease;
+  }
+
+  .icon-btn:hover {
+    background: var(--gx-org-track);
+    color: var(--gx-slate-900);
+  }
+
+  /* Edit/delete carry their label next to the glyph, so they size to content
+     instead of the 32px icon-only square. */
+  .icon-btn--labeled {
+    width: auto;
+    gap: 6px;
+    padding: 8px 12px;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gx-slate-900);
+    white-space: nowrap;
+  }
+
+  .icon-btn--danger:hover {
+    background: var(--gx-danger-soft);
+    color: var(--gx-danger);
+  }
+
+  .add-user-btn:focus-visible,
+  .icon-btn:focus-visible {
+    outline: 2px solid var(--gx-org-primary-500);
+    outline-offset: 2px;
+  }
+
+  /* Without an explicit size these collapse to width:0 as flex items and the
+     button renders empty. */
+  .add-user-btn svg,
+  .icon-btn svg {
+    width: 16px;
+    height: 16px;
+    display: block;
     flex-shrink: 0;
   }
 
-  .collapsible-toggle[aria-expanded="true"] .collapsible-icon {
-    transform: rotate(90deg);
-  }
-
-  .collapsible-label {
-    flex: 1;
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .collapsible-badge {
-    font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.2rem 0.5rem;
-    border-radius: var(--radius-full);
-    background: rgba(var(--glass-tint), 0.12);
-    color: var(--text-secondary);
-  }
-
-  .collapsible-body {
-    padding: 0 var(--space-lg) var(--space-lg);
-    padding-left: calc(var(--space-lg) + 20px + var(--space-md));
-  }
-
-  .permissions-body {
-    padding-top: 0;
-  }
-
-  .permissions-empty {
-    font-size: 0.875rem;
-    color: var(--text-secondary);
-    margin: 0;
-    padding: var(--space-md) 0;
-  }
-
-  .permissions-grid {
-    display: flex;
-    flex-wrap: wrap;
-    flex-direction: row;
-    gap: var(--space-md);
-    padding: var(--space-md) 0;
-  }
-
-  .perm-domain-block {
+  .role-panel__body {
     display: flex;
     flex-direction: column;
-    gap: var(--space-sm);
-    padding: var(--space-lg);
-    min-width: 140px;
-    background: var(--button-bg, rgba(255, 255, 255, 0.02));
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: var(--radius-xl);
-    box-shadow:
-      0 2px 8px rgba(0, 0, 0, 0.12),
-      0 1px 2px rgba(0, 0, 0, 0.08);
-    border-left: 3px solid color-mix(in oklab, var(--brand) 40%, transparent);
+    gap: 16px;
+    align-items: flex-start;
+    align-self: stretch;
+    min-width: 0;
   }
 
-  .perm-domain-name {
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .perm-chips {
+  .users-section,
+  .perms-section {
     display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-xs);
+    flex-direction: column;
+    gap: 10px;
+    align-items: flex-start;
+    align-self: stretch;
+    min-width: 0;
   }
 
-  .perm-chip {
-    font-size: 0.75rem;
-    font-weight: 500;
-    padding: 0.3rem 0.6rem;
-    border-radius: var(--radius-md);
-    background: rgba(var(--brand-rgb), 0.1);
-    color: var(--brand);
-    border: 1px solid rgba(var(--brand-rgb), 0.18);
+  /* ---- ".user-row-mini" ---- */
+  .user-row-mini {
+    border-radius: 8px;
+    background: var(--gx-page);
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
+    display: flex;
+    padding: 8px 12px;
+    justify-content: space-between;
+    align-items: center;
+    align-self: stretch;
+    gap: 12px;
+    box-sizing: border-box;
+    min-width: 0;
   }
 
+  .user-row-mini__left {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .user-row-mini__text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .user-row-mini__name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    line-height: 100%;
+    color: var(--gx-slate-900);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .user-row-mini__email {
+    font-family: var(--gx-font);
+    font-weight: 400;
+    font-size: 11px;
+    line-height: 100%;
+    color: var(--gx-slate-500);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .status-capsule {
+    border-radius: 100px;
+    background: var(--gx-hair);
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--gx-slate-500);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .user-row-mini__actions {
+    display: flex;
+    gap: 16px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .link-btn {
+    border: none;
+    background: transparent;
+    padding: 0;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    line-height: 100%;
+    color: var(--gx-ac-link);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .link-btn:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+
+  .link-btn:disabled {
+    color: var(--gx-slate-400);
+    cursor: not-allowed;
+  }
+
+  .link-btn--danger {
+    color: var(--gx-danger);
+  }
+
+  .link-btn:focus-visible {
+    outline: 2px solid var(--gx-org-primary-500);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  .users-pagination {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    align-self: stretch;
+    padding-top: 2px;
+  }
+
+  .pagination-info {
+    font-family: var(--gx-font);
+    font-size: 12px;
+    color: var(--gx-slate-500);
+  }
+
+  /* ---- add-user search ---- */
   .user-search-wrapper {
     position: relative;
-    margin-bottom: var(--space-lg);
+    align-self: stretch;
+    min-width: 0;
   }
 
   .user-search-box {
+    height: 37px;
+    border-radius: 8px;
+    background: var(--gx-card);
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
     display: flex;
+    gap: 10px;
+    padding: 10px 14px;
     align-items: center;
-    gap: var(--space-md);
-    padding: var(--space-sm) var(--space-md);
-    background: var(--glass-bg-dark);
-    border: 1px solid var(--glass-stroke-dark);
-    border-radius: var(--radius-md);
-    transition: all 0.2s ease;
+    color: var(--gx-slate-400);
+    box-sizing: border-box;
   }
 
   .user-search-box:focus-within {
-    border-color: var(--brand);
-    box-shadow: 0 0 0 2px color-mix(in oklab, var(--brand) 15%, transparent);
-  }
-
-  .search-icon {
-    color: var(--text-secondary);
-    flex-shrink: 0;
-  }
-
-  .user-search-box:focus-within .search-icon {
-    color: var(--brand);
+    box-shadow: inset 0 0 0 1px var(--gx-org-primary-500);
   }
 
   .user-search-input {
-    flex: 1;
-    padding: 0.5rem;
-    border: none;
-    background: transparent;
-    font-size: 0.875rem;
-    color: var(--text-primary);
+    flex-grow: 1;
+    min-width: 0;
+    /* app.css styles every bare <input> as a full glass field — padding, its own
+       radius, a fill, an inset shadow and a focus ring. Inside a search row the
+       container IS the field, so all of that has to be neutralised or the input
+       draws a second pill inside the first. */
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
     outline: none;
+    background: transparent;
     box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    font-family: var(--gx-font);
+    font-size: 14px;
+    line-height: 100%;
+    color: var(--gx-slate-900);
+  }
+
+  .user-search-input:focus {
+    box-shadow: none;
+    background: transparent;
   }
 
   .user-search-input::placeholder {
-    color: var(--text-secondary);
+    color: var(--gx-slate-400);
+    opacity: 1;
   }
 
   .search-close-btn {
+    border: none;
+    background: transparent;
+    padding: 0;
     display: flex;
     align-items: center;
-    justify-content: center;
-    padding: var(--space-xs);
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
+    color: var(--gx-slate-400);
     cursor: pointer;
-    border-radius: var(--radius-sm);
-    transition: all 0.2s ease;
+    flex-shrink: 0;
   }
 
   .search-close-btn:hover {
-    background: color-mix(in oklab, var(--brand-red) 15%, transparent);
-    color: var(--brand-red);
-  }
-
-  .roles-list :global(.admin-panel-card.dropdown-open) {
-    position: relative;
-    z-index: 20;
+    color: var(--gx-slate-900);
   }
 
   .user-search-dropdown {
     position: absolute;
-    top: calc(100% + var(--space-xs));
-    left: 0;
-    right: 0;
-    max-height: 320px;
+    inset-inline: 0;
+    top: calc(100% + 6px);
+    z-index: 20;
+    max-height: 260px;
     overflow-y: auto;
-    background: var(--glass-bg-dark);
-    border: 1px solid var(--glass-stroke-dark);
-    border-radius: var(--radius-md);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
-    z-index: 1000;
+    border-radius: 10px;
+    background: var(--gx-card);
+    box-shadow:
+      inset 0 0 0 1px var(--gx-hair),
+      0 8px 24px 0 rgba(15, 23, 42, 0.1);
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
   }
 
   .search-result-item {
-    width: 100%;
     display: flex;
     align-items: center;
-    gap: var(--space-md);
-    padding: var(--space-sm) var(--space-md);
+    /* app.css centres every button's content; this is a left-aligned row. */
+    justify-content: flex-start;
+    gap: 12px;
+    width: 100%;
+    padding: 8px;
     border: none;
+    border-radius: 8px;
     background: transparent;
-    text-align: left;
     cursor: pointer;
-    font: inherit;
-    color: inherit;
-    transition: background 0.2s ease;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .search-result-item:last-child {
-    border-bottom: none;
+    text-align: start;
+    transition: background-color 120ms ease;
   }
 
   .search-result-item:hover:not(:disabled) {
-    background: rgba(var(--glass-tint), 0.06);
+    background: var(--gx-org-track);
   }
 
   .search-result-item:disabled {
@@ -1234,235 +1650,358 @@ SPDX-License-Identifier: Apache-2.0
     cursor: not-allowed;
   }
 
-  .search-result-item .user-avatar {
-    width: 32px;
-    height: 32px;
-    font-size: 0.8125rem;
-  }
-
-  .search-result-item .user-info {
-    flex: 1;
+  .search-result-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
     min-width: 0;
+    flex-grow: 1;
   }
 
-  .add-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    background: var(--brand);
-    border-radius: 50%;
-    color: white;
-    flex-shrink: 0;
-  }
-
-  .no-results {
-    padding: var(--space-xl);
-    text-align: center;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-  }
-
-  .no-results p {
-    margin: 0;
-  }
-
-  .search-loading {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: var(--space-xl);
-  }
-
+  .add-glyph,
   .adding-spinner {
-    width: 28px;
-    height: 28px;
     display: flex;
     align-items: center;
     justify-content: center;
+    color: var(--gx-org-primary-500);
     flex-shrink: 0;
   }
 
-  .users-loading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--space-md);
-    padding: var(--space-xl);
-  }
-
-  .users-loading p {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-  }
-
-  .users-empty {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: var(--space-xl);
-  }
-
-  .users-empty p {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    font-style: italic;
-  }
-
-  .users-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-sm);
-  }
-
-  .users-pagination {
+  .search-loading,
+  .no-results {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: var(--space-lg);
-    margin-top: var(--space-lg);
-    padding-top: var(--space-md);
-    border-top: 1px solid var(--glass-stroke-dark);
+    padding: 12px;
+    font-family: var(--gx-font);
+    font-size: 13px;
+    color: var(--gx-slate-500);
   }
 
-  .btn-pagination {
-    padding: var(--space-sm) var(--space-md);
-    font-size: 0.8125rem;
-    font-weight: 600;
-    background: var(--button-bg);
-    border: 1px solid var(--glass-stroke-dark);
-    border-radius: var(--radius-md);
-    color: var(--text-primary);
+  /* ---- ".perm-card" ---- */
+  .perm-row-wrap {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-start;
+    align-self: stretch;
+  }
+
+  .perm-card {
+    border-radius: 8px;
+    background: var(--gx-page);
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px;
+    align-items: flex-start;
+    flex-shrink: 0;
+  }
+
+  .perm-card__cat {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    color: var(--gx-slate-400);
+    text-transform: uppercase;
+  }
+
+  /* ".perm-card-more" — a real toggle, sized to sit in the card row. */
+  .perm-card-more {
+    border: none;
+    border-radius: 8px;
+    background: var(--gx-page);
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
+    display: flex;
+    padding: 12px;
+    align-items: center;
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--gx-slate-400);
+    flex-shrink: 0;
     cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .btn-pagination:hover:not(:disabled) {
-    background: var(--btn-secondary);
-    border-color: rgba(255, 255, 255, 0.12);
-  }
-
-  .btn-pagination:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .pagination-info {
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
-  }
-
-  .user-item {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-lg);
-    padding: var(--space-md) var(--space-lg);
-    background: var(--glass-bg-dark);
-    border: 1px solid var(--glass-stroke-dark);
-    border-radius: var(--radius-md);
     transition:
-      border-color 0.2s ease,
-      box-shadow 0.2s ease;
+      background-color 120ms ease,
+      color 120ms ease;
   }
 
-  .user-item:hover {
-    border-color: rgba(255, 255, 255, 0.12);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  .perm-card-more:hover {
+    background: var(--gx-org-track);
+    color: var(--gx-slate-900);
   }
 
-  .user-info {
+  .perm-card-more:focus-visible {
+    outline: 2px solid var(--gx-org-primary-500);
+    outline-offset: 2px;
+  }
+
+  .perm-card__actions {
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--gx-ac-link);
+    white-space: pre-wrap;
+  }
+
+  /* ---- ".roles-grid-wrap": card view ---- */
+  .roles-grid-wrap {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 20px;
+    align-items: flex-start;
+    align-self: stretch;
+    width: 100%;
     min-width: 0;
-    flex: 1;
   }
 
-  .user-name {
-    font-size: 0.9375rem;
-    font-weight: 600;
-    color: var(--text-primary);
-  }
-
-  .user-name-row {
+  .search-row {
+    height: 37px;
+    border-radius: 8px;
+    background: var(--gx-card);
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
     display: flex;
+    gap: 10px;
+    padding: 10px 14px;
     align-items: center;
-    gap: var(--space-sm);
-    flex-wrap: wrap;
-  }
-
-  .user-email {
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
-  }
-
-  .status-capsule {
-    display: inline-flex;
-    padding: 0.15rem 0.5rem;
-    border-radius: var(--radius-full);
-    font-size: 0.6875rem;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    background: rgba(var(--brand-red-rgb), 0.15);
-    color: var(--brand-red);
-  }
-
-  .btn-remove-user {
-    padding: var(--space-sm) var(--space-md);
-    background: transparent;
-    border: 1px solid var(--brand-red);
-    border-radius: var(--radius-md);
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--brand-red);
-    cursor: pointer;
-    transition: all 0.2s ease;
-    white-space: nowrap;
     flex-shrink: 0;
+    color: var(--gx-slate-400);
+    box-sizing: border-box;
   }
 
-  .btn-remove-user:hover:not(:disabled) {
-    background: var(--brand-red);
-    color: white;
+  .search-row:focus-within {
+    box-shadow: inset 0 0 0 1px var(--gx-org-primary-500);
   }
 
-  .btn-remove-user:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .search-row input {
+    flex-grow: 1;
+    min-width: 0;
+    /* app.css styles every bare <input> as a full glass field — padding, its own
+       radius, a fill, an inset shadow and a focus ring. Inside a search row the
+       container IS the field, so all of that has to be neutralised or the input
+       draws a second pill inside the first. */
+    width: 100%;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    outline: none;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    font-family: var(--gx-font);
+    font-size: 14px;
+    line-height: 100%;
+    color: var(--gx-slate-900);
   }
 
-  .user-actions {
+  .search-row input:focus {
+    box-shadow: none;
+    background: transparent;
+  }
+
+  .search-row input::placeholder {
+    color: var(--gx-slate-400);
+    opacity: 1;
+  }
+
+  .roles-search {
+    width: 280px;
+    max-width: 100%;
+    align-self: flex-start;
+  }
+
+  /* The mockup fakes its rows with three hard-coded ".roles-grid" divs of three
+     cards each. With a live role list the count is arbitrary, and a wrapping
+     flex row makes `flex-grow` stretch a lone card on the last line across the
+     full width. auto-fit keeps every card one column wide however many there
+     are, leaving the short last row part-empty instead. */
+  .roles-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 24px;
+    align-items: stretch;
+    align-self: stretch;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .role-card {
+    border-radius: 16px;
+    background: var(--gx-card);
+    /* Figma: border 1px inside Primary/50 (#EFF4FC) = --gx-ring-soft, which also
+       has a dark-mode value; the literal hex would stay light-only. */
+    border: 1px solid var(--gx-ring-soft);
     display: flex;
-    gap: var(--space-sm);
+    flex-direction: column;
+    padding: 20px;
+    justify-content: space-between;
+    transition:
+      border-color 120ms ease,
+      box-shadow 120ms ease;
+    align-items: flex-start;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .role-card__top {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: flex-start;
+    align-self: stretch;
+    min-width: 0;
+  }
+
+  .role-card__title-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    align-self: stretch;
+    gap: 10px;
+  }
+
+  .role-card__title-left {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .role-card__name {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--gx-ac-card-avatar-fg);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Figma 355:29939 — caption under the title, "UI/Caption Regular" (Inter 12)
+     in Primary/400. */
+  .role-card__desc {
+    font-family: var(--gx-font);
+    font-weight: 400;
+    font-size: 12px;
+    line-height: 15px;
+    color: var(--gx-ac-link-soft);
+    align-self: stretch;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .role-card__stats {
+    display: flex;
+    gap: 24px;
+  }
+
+  .role-card__stats .stat__value {
+    color: var(--gx-ac-card-avatar-fg);
+  }
+
+  .role-card__tags {
+    display: flex;
+    gap: 6px;
+    align-items: center;
     flex-wrap: wrap;
-    justify-content: flex-end;
+  }
+
+  .tag-green {
+    border-radius: 6px;
+    /* Figma: Secondary/50 #F1F8F4 = --gx-org-brand-alt-tint. */
+    background: var(--gx-org-brand-alt-tint);
+    padding: 4px 8px;
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--gx-org-brand-alt);
+    white-space: nowrap;
+  }
+
+  .tag-more {
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 11px;
+    color: var(--gx-ac-link-soft);
+    white-space: nowrap;
+  }
+
+  .role-card:hover {
+    border-color: var(--gx-org-primary-100);
+    box-shadow: 0 4px 12px 0 rgba(15, 23, 42, 0.08);
+  }
+
+  .role-card__footer {
+    min-height: 36px;
+    border-top: 1px solid var(--gx-ring-soft);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    align-self: stretch;
+    gap: 10px;
+    padding-top: 12px;
+    margin-top: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* ".avatars-stack" — overlapping faces, each ringed in the card colour so the
+     overlap reads as depth rather than a smudge. */
+  .avatars-stack {
+    display: flex;
     align-items: center;
   }
 
-  .btn-edit-departments {
-    padding: var(--space-sm) var(--space-md);
-    border-radius: var(--radius-md);
-    border: 1px solid rgba(var(--brand-rgb), 0.35);
-    background: transparent;
-    font-size: 0.8125rem;
-    font-weight: 600;
-    color: var(--brand);
-    cursor: pointer;
-    transition: all 0.2s ease;
+  .avatars-stack .avatar-round {
+    width: 24px;
+    height: 24px;
+    font-size: 9px;
+    background: var(--gx-org-primary-500);
+    color: #fff;
+    box-shadow: inset 0 0 0 1.5px var(--gx-card);
+    margin-inline-start: -6px;
   }
 
-  .btn-edit-departments:hover:not(:disabled) {
-    background: var(--brand);
-    color: white;
+  .avatars-stack .avatar-round:first-child {
+    margin-inline-start: 0;
   }
 
+  .avatars-stack .avatar-round--overflow {
+    background: var(--gx-slate-400);
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .role-card__no-users {
+    font-family: var(--gx-font);
+    font-weight: 400;
+    font-size: 12px;
+    color: var(--gx-org-slate-350);
+  }
+
+  .role-card__actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+
+  /* ---- confirm modals: unchanged from before the restyle ---- */
   .remove-confirm {
     padding: var(--space-md);
   }
@@ -1524,5 +2063,31 @@ SPDX-License-Identifier: Apache-2.0
     flex-direction: row;
     padding: 0;
     gap: var(--space-sm);
+  }
+
+  @media (max-width: 768px) {
+    .role-panel__head {
+      align-items: flex-start;
+    }
+
+    .role-panel__right {
+      gap: 16px;
+      width: 100%;
+      justify-content: flex-start;
+    }
+
+    .user-row-mini {
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .user-row-mini__actions {
+      width: 100%;
+    }
+
+    .roles-grid {
+      gap: 16px;
+    }
   }
 </style>
