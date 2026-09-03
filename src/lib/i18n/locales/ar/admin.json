@@ -471,13 +471,30 @@
         "noPermissionsDescription": "لم يتم تكوين أي صلاحيات في النظام.",
         "columns": {
           "action": "الإجراء",
-          "scope": "النطاق"
+          "scope": "النطاق",
+          "permission": "الإذن",
+          "description": "الوصف"
         },
         "scopeableBadge": "قابل للنطاق",
         "scopeableBadgeTitle": "يمكن تحديد نطاقه للأقسام",
         "globalBadge": "عالمي",
         "domainCount": "{count} صلاحية"
-      }
+      },
+      "roleCount": "{count} أدوار",
+      "permissionCount": "{count} أذونات",
+      "viewGrid": "شبكة",
+      "viewList": "قائمة",
+      "viewModeLabel": "طريقة العرض",
+      "searchRoles": "البحث في الأدوار...",
+      "searchPermissions": "البحث في الأذونات...",
+      "noSearchResults": "لا يوجد ما يطابق «{query}».",
+      "customRoleLabel": "دور مخصص",
+      "noUsersAssigned": "لم يتم تعيين مستخدمين",
+      "showMoreUsers": "إظهار {count} إضافية ←",
+      "morePermissions": "+ {count} إضافية",
+      "usersStatLabel": "المستخدمون",
+      "showLess": "عرض أقل",
+      "footerSummary": "{count} أذونات محددة في {categories} فئات"
     },
     "mcpServers": {
       "title": "خوادم MCP",

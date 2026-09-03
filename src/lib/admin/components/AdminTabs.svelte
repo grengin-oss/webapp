@@ -249,11 +249,13 @@ function handleKeydown(event: KeyboardEvent, tab: string, index: number): void {
     transform: none;
   }
 
+  /* The active pill's ink is themable per page via --admin-tab-active-fg; the
+     default keeps every other admin page exactly as it was. */
   .tabs--segmented .tab--active,
   .tabs--segmented .tab[aria-selected="true"] {
     background: var(--gx-card);
     box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.0314);
-    color: var(--gx-slate-900);
+    color: var(--admin-tab-active-fg, var(--gx-slate-900));
   }
 
   @media (max-width: 768px) {

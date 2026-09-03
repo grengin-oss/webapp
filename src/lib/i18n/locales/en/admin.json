@@ -525,13 +525,30 @@
         "noPermissionsDescription": "No permissions have been configured in the system.",
         "columns": {
           "action": "Action",
-          "scope": "Scope"
+          "scope": "Scope",
+          "permission": "Permission",
+          "description": "Description"
         },
         "scopeableBadge": "Scopeable",
         "scopeableBadgeTitle": "Can be scoped to departments",
         "globalBadge": "Global",
         "domainCount": "{count} permissions"
-      }
+      },
+      "roleCount": "{count} roles",
+      "permissionCount": "{count} permissions",
+      "viewGrid": "Grid",
+      "viewList": "List",
+      "viewModeLabel": "View mode",
+      "searchRoles": "Search roles...",
+      "searchPermissions": "Search permissions...",
+      "noSearchResults": "Nothing matches “{query}”.",
+      "customRoleLabel": "Custom role",
+      "noUsersAssigned": "No users assigned",
+      "showMoreUsers": "Show {count} more →",
+      "morePermissions": "+ {count} more",
+      "usersStatLabel": "Users",
+      "showLess": "Show less",
+      "footerSummary": "{count} permissions selected across {categories} categories"
     },
     "mcpServers": {
       "title": "MCP Servers",

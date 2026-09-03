@@ -130,7 +130,7 @@
 /* Light scheme overrides */
 @media (prefers-color-scheme: light) {
   :root {
-    --bg-primary: #fcfcfc;
+    --bg-primary: #F8FAFC;
     --text-primary: #1a1d23;
     --text-secondary: #111827;
 
@@ -279,7 +279,7 @@
   --gx-org-slate-800: rgb(30, 41, 59);
   --gx-org-slate-350: rgb(156, 163, 176);
   --gx-org-hair-soft: rgb(230, 231, 235);
-  --gx-org-track: rgb(241, 245, 249);
+  --gx-org-track: rgb(239, 244, 252);
   --gx-org-track-hover: rgb(232, 238, 245);
   --gx-org-row-hover: rgb(247, 249, 248);
   --gx-org-table-row-hover: rgb(250, 251, 252);
@@ -347,12 +347,10 @@
   --gx-an-field-bg: rgb(249, 250, 251);
 
   /* ---- Control Hub Overview (control-hub-overview.html) ---- */
-  --gx-ch-banner: linear-gradient(
-    90deg,
-    rgb(53, 92, 187) 0%,
-    rgb(45, 77, 161) 48.56%,
-    rgb(36, 59, 132) 100%
-  );
+  --gx-ch-banner: linear-gradient(90deg,
+      rgb(53, 92, 187) 0%,
+      rgb(45, 77, 161) 48.56%,
+      rgb(36, 59, 132) 100%);
   --gx-ch-banner-sub: rgb(168, 184, 216);
   --gx-ch-connect-bg: rgb(0, 147, 106);
   --gx-ch-connect-bg-hover: rgb(0, 130, 94);
@@ -404,6 +402,30 @@
   --gx-tx-file-icon-bg: rgb(253, 236, 236);
   --gx-tx-file-icon-fg: rgb(239, 68, 68);
   --gx-tx-file-size: rgb(156, 163, 176);
+
+  /* ===== Access Control (access-control.html) =====
+     Only the values that no existing --gx-* token already carries; everything
+     else on that page reuses --gx-page / --gx-card / --gx-hair / --gx-ring-soft
+     / --gx-hover-soft / --gx-slate-900 / --gx-slate-500 / --gx-slate-400 /
+     --gx-org-ink / --gx-org-slate-350 / --gx-org-primary-500 / --gx-blue-soft /
+     --gx-org-brand-alt / --gx-tx-chip-icon-fg / --gx-danger. */
+  --gx-ac-slate-700: rgb(51, 65, 85);
+  --gx-ac-slate-600: rgb(71, 85, 105);
+  --gx-ac-slate-300: rgb(203, 213, 225);
+  --gx-ac-cta-hover: rgb(53, 101, 168);
+  --gx-ac-link: rgb(37, 99, 235);
+  --gx-ac-link-soft: rgb(95, 141, 206);
+  --gx-ac-green-bg: rgb(222, 240, 233);
+  --gx-ac-custom-bg: rgb(240, 253, 244);
+  --gx-ac-custom-fg: rgb(21, 128, 61);
+  --gx-ac-system-fg: rgb(29, 78, 216);
+  --gx-ac-dept-bg: rgb(236, 253, 245);
+  --gx-ac-dept-fg: rgb(4, 120, 87);
+  --gx-ac-card-avatar-bg: rgb(220, 229, 244);
+  --gx-ac-card-avatar-fg: rgb(17, 41, 70);
+  --gx-ac-modal-scrim: rgba(15, 23, 42, 0.45);
+  --gx-ac-modal-shadow: 0 12px 32px 0 rgba(15, 23, 42, 0.149);
+  --gx-ac-selected-pill-bg: rgb(238, 242, 255);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -522,12 +544,10 @@
     --gx-an-table-ring: rgba(255, 255, 255, 0.08);
 
     /* Control Hub Overview */
-    --gx-ch-banner: linear-gradient(
-      90deg,
-      rgb(40, 70, 145) 0%,
-      rgb(33, 58, 122) 48.56%,
-      rgb(26, 44, 100) 100%
-    );
+    --gx-ch-banner: linear-gradient(90deg,
+        rgb(40, 70, 145) 0%,
+        rgb(33, 58, 122) 48.56%,
+        rgb(26, 44, 100) 100%);
     --gx-ch-banner-sub: rgb(178, 192, 220);
     --gx-ch-connect-bg: rgb(0, 160, 115);
     --gx-ch-connect-bg-hover: rgb(0, 176, 127);
@@ -577,6 +597,25 @@
     --gx-tx-file-icon-bg: rgba(239, 68, 68, 0.18);
     --gx-tx-file-icon-fg: #f87171;
     --gx-tx-file-size: #8d9aab;
+    /* Access Control — dark. Soft tints become low-alpha films so they still
+       read on the dark page; inks lift to the light end of their hue. */
+    --gx-ac-slate-700: #c7d0da;
+    --gx-ac-slate-600: #aab4c0;
+    --gx-ac-slate-300: rgba(255, 255, 255, 0.24);
+    --gx-ac-cta-hover: rgb(134, 172, 227);
+    --gx-ac-link: #7ea8f0;
+    --gx-ac-link-soft: #8fa9d4;
+    --gx-ac-green-bg: rgba(43, 145, 107, 0.22);
+    --gx-ac-custom-bg: rgba(34, 197, 94, 0.16);
+    --gx-ac-custom-fg: #6ee7a4;
+    --gx-ac-system-fg: #93aeea;
+    --gx-ac-dept-bg: rgba(4, 120, 87, 0.22);
+    --gx-ac-dept-fg: #5fd6ab;
+    --gx-ac-card-avatar-bg: rgba(112, 155, 218, 0.24);
+    --gx-ac-card-avatar-fg: #cfe0f7;
+    --gx-ac-modal-scrim: rgba(0, 0, 0, 0.62);
+    --gx-ac-modal-shadow: 0 12px 32px 0 rgba(0, 0, 0, 0.5);
+    --gx-ac-selected-pill-bg: rgba(112, 155, 218, 0.2);
     --gx-org-field-bg: rgba(255, 255, 255, 0.04);
     --gx-org-primary-500: rgb(112, 155, 218);
     --gx-org-primary-500-hover: rgb(134, 172, 227);

@@ -18,9 +18,13 @@ SPDX-License-Identifier: Apache-2.0
     restoreFocusOnClose?: boolean;
     /**
      * "default" is the app-wide dark dialog; "organization" is the light
-     * 424px card the Organization design uses (organization.html .edit-modal).
+     * 424px card the Organization design uses (organization.html .edit-modal);
+     * "access-control" is the 560px card from access-control.html, with the
+     * gradient rule across the header and a pinned footer bar.
      */
-    variant?: "default" | "organization";
+    variant?: "default" | "organization" | "access-control";
+    /** Pinned footer bar, outside the scrolling body (access-control design). */
+    footer?: any;
   }
 
   let {
@@ -28,6 +32,7 @@ SPDX-License-Identifier: Apache-2.0
     title,
     onclose,
     children,
+    footer,
     descriptionId,
     restoreFocusOnClose = true,
     variant = "default",
@@ -232,6 +237,7 @@ SPDX-License-Identifier: Apache-2.0
       bind:this={modalBackdrop}
       class="modal-backdrop"
       class:modal-backdrop--org={variant === "organization"}
+      class:modal-backdrop--ac={variant === "access-control"}
       data-modal-id={modalId}
       onclick={handleBackdropClick}
       onkeydown={(e) => e.key === "Enter" && handleBackdropClick(e as any)}
@@ -241,7 +247,11 @@ SPDX-License-Identifier: Apache-2.0
       aria-describedby={descriptionId}
       tabindex="0"
     >
-      <div class="modal-content" class:modal-content--org={variant === "organization"}>
+      <div
+        class="modal-content"
+        class:modal-content--org={variant === "organization"}
+        class:modal-content--ac={variant === "access-control"}
+      >
         <div class="modal-header">
           <h2 id={titleId} class="modal-title">{title}</h2>
           <button
@@ -265,12 +275,110 @@ SPDX-License-Identifier: Apache-2.0
         <div class="modal-body">
           {@render children?.()}
         </div>
+        {#if footer}
+          <div class="modal-footer">
+            {@render footer()}
+          </div>
+        {/if}
       </div>
     </div>
   </div>
 {/if}
 
 <style>
+  /* ===== "access-control" variant (access-control.html .modal) =====
+     Selectors are doubled up (.modal-content.modal-content--ac) because the base
+     .modal-content rules live further down this stylesheet — at equal specificity
+     they would win on source order and the card would keep the default 600px/24px. */
+  .modal-backdrop.modal-backdrop--ac {
+    background: var(--gx-ac-modal-scrim);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .modal-content.modal-content--ac {
+    width: 560px;
+    max-width: calc(100vw - 32px);
+    max-height: 87vh;
+    overflow: hidden;
+    border: none;
+    border-radius: 20px;
+    background: var(--gx-card);
+    box-shadow: var(--gx-ac-modal-shadow);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* The design rules the top of the header with a blue-to-green gradient. */
+  .modal-content.modal-content--ac .modal-header {
+    position: relative;
+    min-height: 74px;
+    padding: 20px 24px;
+    border: none;
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
+    flex-shrink: 0;
+  }
+
+  .modal-content.modal-content--ac .modal-header::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 5px;
+    background: linear-gradient(90deg, rgb(74, 125, 212) 0%, rgb(46, 168, 117) 100%);
+  }
+
+  .modal-content.modal-content--ac .modal-title {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--gx-slate-900);
+  }
+
+  .modal-content.modal-content--ac .modal-close {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--gx-card);
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
+    color: var(--gx-slate-500);
+    flex-shrink: 0;
+    transition: background-color 120ms ease;
+  }
+
+  .modal-content.modal-content--ac .modal-close:hover {
+    background: var(--gx-org-track);
+  }
+
+  .modal-content.modal-content--ac .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 24px;
+    align-items: flex-start;
+    align-self: stretch;
+    overflow-y: auto;
+    flex-grow: 1;
+    min-height: 0;
+  }
+
+  .modal-content.modal-content--ac .modal-footer {
+    min-height: 77px;
+    background: var(--gx-card);
+    box-shadow:
+      inset 0 0 0 1px var(--gx-hair),
+      inset 0 -4px 8px 0 rgba(0, 0, 0, 0.0392);
+    display: flex;
+    padding: 20px 24px;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+  }
+
   .modal-backdrop {
     position: fixed;
     inset: 0;

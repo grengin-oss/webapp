@@ -471,13 +471,30 @@
         "noPermissionsDescription": "No se han configurado permisos en el sistema.",
         "columns": {
           "action": "Acción",
-          "scope": "Alcance"
+          "scope": "Alcance",
+          "permission": "Permiso",
+          "description": "Descripción"
         },
         "scopeableBadge": "Con alcance",
         "scopeableBadgeTitle": "Puede asignarse a departamentos",
         "globalBadge": "General",
         "domainCount": "{count} permisos"
-      }
+      },
+      "roleCount": "{count} funciones",
+      "permissionCount": "{count} permisos",
+      "viewGrid": "Cuadrícula",
+      "viewList": "Lista",
+      "viewModeLabel": "Modo de vista",
+      "searchRoles": "Buscar roles...",
+      "searchPermissions": "Buscar permisos...",
+      "noSearchResults": "Nada coincide con «{query}».",
+      "customRoleLabel": "Rol personalizado",
+      "noUsersAssigned": "Sin usuarios asignados",
+      "showMoreUsers": "Mostrar {count} más →",
+      "morePermissions": "+ {count} más",
+      "usersStatLabel": "Usuarios",
+      "showLess": "Mostrar menos",
+      "footerSummary": "{count} permisos seleccionados en {categories} categorías"
     },
     "mcpServers": {
       "title": "Servidores MCP",

@@ -1,0 +1,82 @@
+{
+  "roles": [
+    {
+      "id": "r-vibe-coder",
+      "name": "Vibe coder",
+      "is_system": false,
+      "user_count": 1,
+      "permissions": [
+        "mcp_servers:delegate",
+        "mcp_servers:admin",
+        "mcp_servers:view",
+        "users:view",
+        "users:manage"
+      ]
+    },
+    {
+      "id": "r-super-admin",
+      "name": "Super Admin",
+      "is_system": true,
+      "user_count": 7,
+      "permissions": [
+        "roles:view",
+        "roles:manage",
+        "roles:assign",
+        "mcp_servers:manage",
+        "mcp_servers:admin",
+        "mcp_servers:delegate",
+        "users:view",
+        "users:manage",
+        "budget:view",
+        "budget:allocate",
+        "analytics:view",
+        "audit_logs:view",
+        "departments:view",
+        "departments:manage",
+        "ai_platform:manage",
+        "ai_platform:view",
+        "skills:view",
+        "sso_providers:view"
+      ]
+    },
+    {
+      "id": "r-hr-admin",
+      "name": "HR Admin",
+      "is_system": true,
+      "user_count": 0,
+      "permissions": [
+        "departments:view",
+        "departments:manage",
+        "roles:view",
+        "users:view",
+        "users:manage"
+      ]
+    },
+    {
+      "id": "r-finance-admin",
+      "name": "Finance Admin",
+      "is_system": true,
+      "user_count": 2,
+      "permissions": [
+        "budget:view",
+        "budget:allocate",
+        "analytics:view",
+        "departments:view"
+      ]
+    },
+    {
+      "id": "r-analyst",
+      "name": "Analyst",
+      "is_system": false,
+      "user_count": 3,
+      "permissions": ["analytics:view", "audit_logs:view", "budget:view"]
+    },
+    {
+      "id": "r-viewer",
+      "name": "Viewer",
+      "is_system": true,
+      "user_count": 0,
+      "permissions": ["analytics:view"]
+    }
+  ]
+}

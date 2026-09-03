@@ -471,13 +471,30 @@
         "noPermissionsDescription": "システムに権限がまだ設定されていません。",
         "columns": {
           "action": "操作",
-          "scope": "範囲"
+          "scope": "範囲",
+          "permission": "権限",
+          "description": "説明"
         },
         "scopeableBadge": "範囲指定可",
         "scopeableBadgeTitle": "部門に限定できます",
         "globalBadge": "グローバル",
         "domainCount": "{count} 件の権限"
-      }
+      },
+      "roleCount": "{count} 件のロール",
+      "permissionCount": "{count} 件の権限",
+      "viewGrid": "グリッド",
+      "viewList": "リスト",
+      "viewModeLabel": "表示モード",
+      "searchRoles": "ロールを検索...",
+      "searchPermissions": "権限を検索...",
+      "noSearchResults": "「{query}」に一致する項目はありません。",
+      "customRoleLabel": "カスタムロール",
+      "noUsersAssigned": "割り当てられたユーザーなし",
+      "showMoreUsers": "他 {count} 件を表示 →",
+      "morePermissions": "+ 他 {count} 件",
+      "usersStatLabel": "ユーザー",
+      "showLess": "表示を減らす",
+      "footerSummary": "{categories} 個のカテゴリで {count} 件の権限を選択"
     },
     "mcpServers": {
       "title": "MCPサーバー",
