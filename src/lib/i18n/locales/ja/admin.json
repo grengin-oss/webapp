@@ -1248,7 +1248,10 @@
       "mustRemainWhitelisted": "デフォルトモデルはホワイトリストに残す必要があります",
       "cannotRemoveDefault": "デフォルトモデルをホワイトリストから削除できません。まずデフォルトモデルを変更してください。",
       "imageModel": "画像生成モデル",
-      "textModel": "テキストモデル"
+      "textModel": "テキストモデル",
+      "searchPlaceholder": "モデルを検索…",
+      "countEnabled": "{total} 件中 {count} 件が有効",
+      "noSearchResults": "「{query}」に一致するモデルはありません。"
     },
     "systemDefault": {
       "title": "システムのデフォルトエンジンとして設定",
@@ -1263,7 +1266,8 @@
     },
     "actions": {
       "save": "保存",
-      "saving": "保存中..."
+      "saving": "保存中...",
+      "saveChanges": "変更を保存"
     },
     "toasts": {
       "enabled": "{name} を有効化しました",
@@ -1288,7 +1292,47 @@
       "defaultModel": "デフォルトモデル: {model}",
       "modelsWhitelisted": "{count} モデルがホワイトリストに登録されています",
       "noModelsAllowed": "許可されたモデルがありません"
-    }
+    },
+    "searchPlaceholder": "エンジンを検索（例: OpenAI、Mistral）",
+    "connectEngine": "エンジンを接続",
+    "noResults": "「{query}」に一致するエンジンはありません。",
+    "filters": {
+      "label": "エンジンを絞り込む",
+      "all": "すべて",
+      "active": "有効",
+      "available": "利用可能"
+    },
+    "stats": {
+      "connectedValue": "{total} 件中 {connected} 件",
+      "connectedLabel": "接続済みエンジン",
+      "whitelistedLabel": "許可済みモデル",
+      "mostUsedLabel": "今週の最多利用 — {count} リクエスト",
+      "noUsageLabel": "今週の利用実績はありません"
+    },
+    "card": {
+      "defaultModel": "既定モデル",
+      "whitelist": "許可リスト",
+      "whitelistCount": "{count} モデル",
+      "notSet": "未設定",
+      "notConnected": "未接続",
+      "connectFirst": "このエンジンを有効にする前に API キーを追加してください。",
+      "noKeyDescription": "ワークスペースで {name} のモデルを使うには API キーを追加してください。"
+    },
+    "configure": {
+      "title": "{name} を設定",
+      "subtitle": "API キー、モデル許可リスト、既定値"
+    },
+    "connect": {
+      "title": "{name} を接続",
+      "emptyTitle": "{name} に接続",
+      "emptyDescription": "{name} の API キーを入力すると、Grengin プラットフォームでそのモデルを利用できます。",
+      "placeholder": "{name} の API キーを入力",
+      "help": "API キーは {name} のダッシュボードで確認または発行できます。",
+      "submit": "接続して保存",
+      "connecting": "接続しています...",
+      "connected": "{name} を接続しました"
+    },
+    "noFilterResults": "このビューに該当するエンジンはありません。"
   },
   "adminOverview": {
     "title": "概要",

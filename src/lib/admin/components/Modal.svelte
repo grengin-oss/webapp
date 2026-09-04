@@ -20,11 +20,25 @@ SPDX-License-Identifier: Apache-2.0
      * "default" is the app-wide dark dialog; "organization" is the light
      * 424px card the Organization design uses (organization.html .edit-modal);
      * "access-control" is the 560px card from access-control.html, with the
-     * gradient rule across the header and a pinned footer bar.
+     * gradient rule across the header and a pinned footer bar;
+     * "ai-engines" and "ai-connect" are the two dialogs from ai-engines.html
+     * (.cfg-modal, 560px, and .cnx-modal, 680px) — same gradient rule, but a
+     * tinted footer whose actions sit right.
      */
-    variant?: "default" | "organization" | "access-control";
+    variant?:
+      | "default"
+      | "organization"
+      | "access-control"
+      | "ai-engines"
+      | "ai-connect";
     /** Pinned footer bar, outside the scrolling body (access-control design). */
     footer?: any;
+    /** Second line under the title (ai-engines design: ".cfg-subtitle"). */
+    subtitle?: string;
+    /** Brand mark to the left of the title (ai-engines design). */
+    headerIcon?: any;
+    /** Status pill beside the title (ai-connect design: ".cnx-badge"). */
+    headerBadge?: any;
   }
 
   let {
@@ -33,6 +47,9 @@ SPDX-License-Identifier: Apache-2.0
     onclose,
     children,
     footer,
+    subtitle,
+    headerIcon,
+    headerBadge,
     descriptionId,
     restoreFocusOnClose = true,
     variant = "default",
@@ -238,6 +255,8 @@ SPDX-License-Identifier: Apache-2.0
       class="modal-backdrop"
       class:modal-backdrop--org={variant === "organization"}
       class:modal-backdrop--ac={variant === "access-control"}
+      class:modal-backdrop--ae={variant === "ai-engines" ||
+        variant === "ai-connect"}
       data-modal-id={modalId}
       onclick={handleBackdropClick}
       onkeydown={(e) => e.key === "Enter" && handleBackdropClick(e as any)}
@@ -251,9 +270,24 @@ SPDX-License-Identifier: Apache-2.0
         class="modal-content"
         class:modal-content--org={variant === "organization"}
         class:modal-content--ac={variant === "access-control"}
+        class:modal-content--ae={variant === "ai-engines"}
+        class:modal-content--cnx={variant === "ai-connect"}
       >
         <div class="modal-header">
-          <h2 id={titleId} class="modal-title">{title}</h2>
+          <div class="modal-header-left">
+            {#if headerIcon}
+              <span class="modal-header-icon">{@render headerIcon()}</span>
+            {/if}
+            <div class="modal-heading">
+              <h2 id={titleId} class="modal-title">{title}</h2>
+              {#if subtitle}
+                <p class="modal-subtitle">{subtitle}</p>
+              {/if}
+            </div>
+            {#if headerBadge}
+              {@render headerBadge()}
+            {/if}
+          </div>
           <button
             type="button"
             class="modal-close"
@@ -377,6 +411,199 @@ SPDX-License-Identifier: Apache-2.0
     gap: 12px;
     flex-wrap: wrap;
     flex-shrink: 0;
+  }
+
+  /* ===== Header pieces, shared by every variant =====
+     The title — with its optional brand mark, subtitle and status pill — on the
+     left, the close button on the right. Variants that pass none of the three
+     render exactly what they did before: a lone <h2> beside the button. */
+  .modal-header-left {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  /* ".cfg-header-left" opens up a little when a subtitle stacks under the title. */
+  .modal-header-left:has(.modal-subtitle) {
+    gap: 16px;
+  }
+
+  .modal-heading {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .modal-header-icon {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .modal-subtitle {
+    margin: 0;
+    font-family: var(--gx-font);
+    font-weight: 400;
+    font-size: 13px;
+    line-height: 100%;
+    color: var(--gx-ae-muted);
+  }
+
+  /* ===== "ai-engines" / "ai-connect" variants (ai-engines.html .cfg-modal and
+     .cnx-modal) — same gradient-ruled header as access-control, but the footer
+     is tinted and its actions sit right. Selectors are doubled for the same
+     reason as the access-control block above. ===== */
+  .modal-backdrop.modal-backdrop--ae {
+    background: var(--gx-ac-modal-scrim);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .modal-content.modal-content--ae,
+  .modal-content.modal-content--cnx {
+    max-height: 88vh;
+    overflow: hidden;
+    border: none;
+    background: var(--gx-card);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    display: flex;
+    flex-direction: column;
+    font-family: var(--gx-font);
+  }
+
+  .modal-content.modal-content--ae {
+    width: 560px;
+    max-width: calc(100vw - 32px);
+    border-radius: 18px;
+    box-shadow: var(--gx-ae-modal-shadow);
+  }
+
+  .modal-content.modal-content--cnx {
+    width: 680px;
+    max-width: 92vw;
+    border-radius: 20px;
+    box-shadow: var(--gx-ae-connect-shadow);
+  }
+
+  .modal-content.modal-content--ae .modal-header,
+  .modal-content.modal-content--cnx .modal-header {
+    position: relative;
+    border: none;
+    flex-shrink: 0;
+  }
+
+  .modal-content.modal-content--ae .modal-header {
+    min-height: 79px;
+    padding: 20px 24px;
+    box-shadow: inset 0 0 0 1px var(--gx-ae-hair);
+  }
+
+  .modal-content.modal-content--cnx .modal-header {
+    min-height: 76px;
+    padding: 20px 20px 20px 24px;
+    box-shadow: inset 0 0 0 1px var(--gx-line);
+  }
+
+  .modal-content.modal-content--ae .modal-header::before,
+  .modal-content.modal-content--cnx .modal-header::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 5px;
+    background: linear-gradient(
+      90deg,
+      rgb(74, 125, 212) 0%,
+      rgb(46, 168, 117) 100%
+    );
+  }
+
+  .modal-content.modal-content--ae .modal-title {
+    font-family: var(--gx-font);
+    font-weight: 600;
+    font-size: 16px;
+    line-height: 100%;
+    color: var(--gx-ae-ink);
+  }
+
+  .modal-content.modal-content--cnx .modal-title {
+    font-family: var(--gx-font);
+    font-weight: 700;
+    font-size: 18px;
+    line-height: 100%;
+    color: var(--gx-ink);
+  }
+
+  .modal-content.modal-content--ae .modal-close,
+  .modal-content.modal-content--cnx .modal-close {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--gx-card);
+    box-shadow: inset 0 0 0 1px var(--gx-hair);
+    color: var(--gx-an-sub);
+    flex-shrink: 0;
+    transition: background-color 120ms ease;
+  }
+
+  .modal-content.modal-content--ae .modal-close:hover,
+  .modal-content.modal-content--cnx .modal-close:hover {
+    background: var(--gx-hover-soft);
+    color: var(--gx-an-sub);
+  }
+
+  .modal-content.modal-content--ae .modal-close svg,
+  .modal-content.modal-content--cnx .modal-close svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .modal-content.modal-content--ae .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding: 24px;
+    align-items: flex-start;
+    align-self: stretch;
+    overflow-y: auto;
+    flex-grow: 1;
+    min-height: 0;
+  }
+
+  .modal-content.modal-content--cnx .modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    padding: 32px;
+    align-items: center;
+    align-self: stretch;
+    overflow-y: auto;
+    flex-grow: 1;
+    min-height: 0;
+  }
+
+  .modal-content.modal-content--ae .modal-footer,
+  .modal-content.modal-content--cnx .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .modal-content.modal-content--ae .modal-footer {
+    min-height: 90px;
+    padding: 16px 24px;
+    background: var(--gx-ae-chip);
+    border-top: 1px solid var(--gx-ae-hair);
+  }
+
+  .modal-content.modal-content--cnx .modal-footer {
+    min-height: 88px;
+    padding: 20px;
+    background: var(--gx-surface-rail);
+    border-top: 1px solid var(--gx-line);
   }
 
   .modal-backdrop {

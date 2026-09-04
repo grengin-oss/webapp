@@ -426,6 +426,39 @@
   --gx-ac-modal-scrim: rgba(15, 23, 42, 0.45);
   --gx-ac-modal-shadow: 0 12px 32px 0 rgba(15, 23, 42, 0.149);
   --gx-ac-selected-pill-bg: rgb(238, 242, 255);
+
+  /* ===== AI Engines (ai-engines.html) =====
+     Again only the values no existing --gx-* token already carries. The page
+     otherwise reuses --gx-page / --gx-card / --gx-hair / --gx-ring-soft /
+     --gx-hover-soft / --gx-org-ink / --gx-an-sub / --gx-org-slate-350 /
+     --gx-org-primary-500 / --gx-ac-cta-hover / --gx-org-brand-alt /
+     --gx-org-hair-soft / --gx-line / --gx-ink / --gx-muted / --gx-fill-soft /
+     --gx-surface-rail. */
+  --gx-ae-green-soft: rgb(84, 178, 134);
+  /* Brand tile behind an engine logo. Registry icons paint with
+     `fill="currentColor"`, so the tile owns both the fill and the ink. */
+  --gx-ae-tile: rgb(14, 24, 40);
+  --gx-ae-tile-fg: rgb(255, 255, 255);
+  --gx-ae-ink: rgb(27, 30, 36);
+  --gx-ae-muted: rgb(97, 102, 112);
+  --gx-ae-dim: rgb(139, 145, 157);
+  --gx-ae-hair: rgb(226, 229, 236);
+  --gx-ae-chip: rgb(247, 248, 250);
+  --gx-ae-row-dim: rgb(251, 251, 252);
+  --gx-ae-blue: rgb(63, 92, 184);
+  --gx-ae-blue-hover: rgb(52, 78, 160);
+  --gx-ae-ok: rgb(76, 169, 122);
+  --gx-ae-ok-bg: rgb(234, 246, 240);
+  --gx-ae-bad: rgb(216, 86, 78);
+  --gx-ae-bad-bg: rgb(253, 238, 237);
+  --gx-ae-callout-bg: rgb(238, 243, 252);
+  --gx-ae-callout-ring: rgb(200, 214, 243);
+  --gx-ae-teal: rgb(14, 124, 102);
+  --gx-ae-teal-hover: rgb(11, 102, 84);
+  --gx-ae-teal-bg: rgb(231, 243, 239);
+  --gx-ae-card-shadow: 0 4px 12px 0 rgba(26, 29, 26, 0.0196);
+  --gx-ae-modal-shadow: 0 16px 48px 0 rgba(9, 11, 14, 0.149);
+  --gx-ae-connect-shadow: 0 16px 40px -4px rgba(0, 0, 0, 0.1686);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -616,6 +649,31 @@
     --gx-ac-modal-scrim: rgba(0, 0, 0, 0.62);
     --gx-ac-modal-shadow: 0 12px 32px 0 rgba(0, 0, 0, 0.5);
     --gx-ac-selected-pill-bg: rgba(112, 155, 218, 0.2);
+    /* AI Engines — dark, same treatment: tints become low-alpha films, inks
+       lift, and the two card shadows go opaque-black so they still read. */
+    --gx-ae-green-soft: rgb(52, 138, 102);
+    --gx-ae-tile: rgba(255, 255, 255, 0.12);
+    --gx-ae-tile-fg: #eef1f0;
+    --gx-ae-ink: #eef1f0;
+    --gx-ae-muted: #a3aebd;
+    --gx-ae-dim: #8d9aab;
+    --gx-ae-hair: rgba(255, 255, 255, 0.1);
+    --gx-ae-chip: rgba(255, 255, 255, 0.05);
+    --gx-ae-row-dim: rgba(255, 255, 255, 0.03);
+    --gx-ae-blue: rgb(112, 137, 219);
+    --gx-ae-blue-hover: rgb(133, 155, 229);
+    --gx-ae-ok: #5fd3a3;
+    --gx-ae-ok-bg: rgba(76, 169, 122, 0.18);
+    --gx-ae-bad: #f08a83;
+    --gx-ae-bad-bg: rgba(216, 86, 78, 0.18);
+    --gx-ae-callout-bg: rgba(63, 92, 184, 0.16);
+    --gx-ae-callout-ring: rgba(112, 137, 219, 0.38);
+    --gx-ae-teal: #3fb69b;
+    --gx-ae-teal-hover: #58c7ae;
+    --gx-ae-teal-bg: rgba(14, 124, 102, 0.22);
+    --gx-ae-card-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.35);
+    --gx-ae-modal-shadow: 0 16px 48px 0 rgba(0, 0, 0, 0.55);
+    --gx-ae-connect-shadow: 0 16px 40px -4px rgba(0, 0, 0, 0.5);
     --gx-org-field-bg: rgba(255, 255, 255, 0.04);
     --gx-org-primary-500: rgb(112, 155, 218);
     --gx-org-primary-500-hover: rgb(134, 172, 227);

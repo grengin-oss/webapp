@@ -1302,7 +1302,10 @@
       "mustRemainWhitelisted": "Default model must remain whitelisted",
       "cannotRemoveDefault": "Cannot remove the default model from the whitelist. Please change the default model first.",
       "imageModel": "Image generation model",
-      "textModel": "Text model"
+      "textModel": "Text model",
+      "searchPlaceholder": "Search models…",
+      "countEnabled": "{count} of {total} enabled",
+      "noSearchResults": "No models match “{query}”."
     },
     "systemDefault": {
       "title": "Set as system default engine",
@@ -1317,7 +1320,8 @@
     },
     "actions": {
       "save": "Save",
-      "saving": "Saving..."
+      "saving": "Saving...",
+      "saveChanges": "Save Changes"
     },
     "toasts": {
       "enabled": "{name} enabled",
@@ -1342,7 +1346,47 @@
       "defaultModel": "Default Model: {model}",
       "modelsWhitelisted": "{count} Models Whitelisted",
       "noModelsAllowed": "No Models Allowed"
-    }
+    },
+    "searchPlaceholder": "Search engines (e.g. OpenAI, Mistral)",
+    "connectEngine": "Connect Engine",
+    "noResults": "No engines match “{query}”.",
+    "filters": {
+      "label": "Filter engines",
+      "all": "All",
+      "active": "Active",
+      "available": "Available"
+    },
+    "stats": {
+      "connectedValue": "{connected} of {total}",
+      "connectedLabel": "Engines connected",
+      "whitelistedLabel": "Models whitelisted",
+      "mostUsedLabel": "Most used this week — {count} req",
+      "noUsageLabel": "No usage recorded this week"
+    },
+    "card": {
+      "defaultModel": "Default Model",
+      "whitelist": "Whitelist",
+      "whitelistCount": "{count} models",
+      "notSet": "Not set",
+      "notConnected": "Not Connected",
+      "connectFirst": "Add an API key before enabling this engine.",
+      "noKeyDescription": "Add an API key to enable {name} models for your workspace."
+    },
+    "configure": {
+      "title": "Configure {name}",
+      "subtitle": "API key, model whitelist & defaults"
+    },
+    "connect": {
+      "title": "Connect {name}",
+      "emptyTitle": "Connect to {name}",
+      "emptyDescription": "Provide your {name} API key to unlock its models in the Grengin platform.",
+      "placeholder": "Enter your {name} API key",
+      "help": "You can find or generate your API key in the {name} dashboard.",
+      "submit": "Connect and Save",
+      "connecting": "Connecting...",
+      "connected": "{name} connected successfully"
+    },
+    "noFilterResults": "No engines in this view."
   },
   "adminOverview": {
     "title": "Overview",
