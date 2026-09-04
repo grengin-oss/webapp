@@ -1248,7 +1248,10 @@
       "mustRemainWhitelisted": "El modelo predeterminado debe permanecer en la lista blanca",
       "cannotRemoveDefault": "No se puede eliminar el modelo predeterminado de la lista blanca. Por favor cambie el modelo predeterminado primero.",
       "imageModel": "Modelo de generación de imágenes",
-      "textModel": "Modelo de texto"
+      "textModel": "Modelo de texto",
+      "searchPlaceholder": "Buscar modelos…",
+      "countEnabled": "{count} de {total} habilitados",
+      "noSearchResults": "Ningún modelo coincide con «{query}»."
     },
     "systemDefault": {
       "title": "Establecer como motor predeterminado del sistema",
@@ -1263,7 +1266,8 @@
     },
     "actions": {
       "save": "Guardar",
-      "saving": "Guardando..."
+      "saving": "Guardando...",
+      "saveChanges": "Guardar cambios"
     },
     "toasts": {
       "enabled": "{name} habilitado",
@@ -1288,7 +1292,47 @@
       "defaultModel": "Modelo predeterminado: {model}",
       "modelsWhitelisted": "{count} modelos en lista blanca",
       "noModelsAllowed": "No hay modelos permitidos"
-    }
+    },
+    "searchPlaceholder": "Buscar motores (p. ej. OpenAI, Mistral)",
+    "connectEngine": "Conectar motor",
+    "noResults": "Ningún motor coincide con «{query}».",
+    "filters": {
+      "label": "Filtrar motores",
+      "all": "Todos",
+      "active": "Activos",
+      "available": "Disponibles"
+    },
+    "stats": {
+      "connectedValue": "{connected} de {total}",
+      "connectedLabel": "Motores conectados",
+      "whitelistedLabel": "Modelos en la lista blanca",
+      "mostUsedLabel": "Más usado esta semana — {count} sol.",
+      "noUsageLabel": "Sin uso registrado esta semana"
+    },
+    "card": {
+      "defaultModel": "Modelo predeterminado",
+      "whitelist": "Lista blanca",
+      "whitelistCount": "{count} modelos",
+      "notSet": "Sin definir",
+      "notConnected": "No conectado",
+      "connectFirst": "Añade una clave de API antes de activar este motor.",
+      "noKeyDescription": "Añade una clave de API para habilitar los modelos de {name} en tu espacio de trabajo."
+    },
+    "configure": {
+      "title": "Configurar {name}",
+      "subtitle": "Clave de API, lista blanca de modelos y valores predeterminados"
+    },
+    "connect": {
+      "title": "Conectar {name}",
+      "emptyTitle": "Conectar con {name}",
+      "emptyDescription": "Proporciona tu clave de API de {name} para desbloquear sus modelos en la plataforma Grengin.",
+      "placeholder": "Introduce tu clave de API de {name}",
+      "help": "Puedes encontrar o generar tu clave de API en el panel de {name}.",
+      "submit": "Conectar y guardar",
+      "connecting": "Conectando...",
+      "connected": "{name} se ha conectado correctamente"
+    },
+    "noFilterResults": "No hay motores en esta vista."
   },
   "adminOverview": {
     "title": "Resumen",

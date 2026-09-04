@@ -1248,7 +1248,10 @@
       "mustRemainWhitelisted": "يجب أن يبقى النموذج الافتراضي في القائمة البيضاء",
       "cannotRemoveDefault": "لا يمكن إزالة النموذج الافتراضي من القائمة البيضاء. يرجى تغيير النموذج الافتراضي أولاً.",
       "imageModel": "نموذج توليد الصور",
-      "textModel": "نموذج نصي"
+      "textModel": "نموذج نصي",
+      "searchPlaceholder": "البحث عن النماذج…",
+      "countEnabled": "{count} من {total} مفعّلة",
+      "noSearchResults": "لا توجد نماذج تطابق «{query}»."
     },
     "systemDefault": {
       "title": "تعيين كمحرك افتراضي للنظام",
@@ -1263,7 +1266,8 @@
     },
     "actions": {
       "save": "حفظ",
-      "saving": "جارٍ الحفظ..."
+      "saving": "جارٍ الحفظ...",
+      "saveChanges": "حفظ التغييرات"
     },
     "toasts": {
       "enabled": "تم تفعيل {name}",
@@ -1288,7 +1292,47 @@
       "defaultModel": "النموذج الافتراضي: {model}",
       "modelsWhitelisted": "{count} نموذج في القائمة البيضاء",
       "noModelsAllowed": "لا توجد نماذج مسموح بها"
-    }
+    },
+    "searchPlaceholder": "البحث عن المحركات (مثل OpenAI وMistral)",
+    "connectEngine": "توصيل المحرك",
+    "noResults": "لا توجد محركات تطابق «{query}».",
+    "filters": {
+      "label": "تصفية المحركات",
+      "all": "الكل",
+      "active": "نشطة",
+      "available": "متاحة"
+    },
+    "stats": {
+      "connectedValue": "{connected} من {total}",
+      "connectedLabel": "المحركات المتصلة",
+      "whitelistedLabel": "النماذج المسموح بها",
+      "mostUsedLabel": "الأكثر استخدامًا هذا الأسبوع — {count} طلب",
+      "noUsageLabel": "لا يوجد استخدام مسجل هذا الأسبوع"
+    },
+    "card": {
+      "defaultModel": "النموذج الافتراضي",
+      "whitelist": "قائمة السماح",
+      "whitelistCount": "{count} نماذج",
+      "notSet": "غير محدد",
+      "notConnected": "غير متصل",
+      "connectFirst": "أضف مفتاح API قبل تفعيل هذا المحرك.",
+      "noKeyDescription": "أضف مفتاح API لتفعيل نماذج {name} في مساحة عملك."
+    },
+    "configure": {
+      "title": "تهيئة {name}",
+      "subtitle": "مفتاح API وقائمة النماذج المسموح بها والإعدادات الافتراضية"
+    },
+    "connect": {
+      "title": "توصيل {name}",
+      "emptyTitle": "الاتصال بـ {name}",
+      "emptyDescription": "أدخل مفتاح API الخاص بـ {name} لإتاحة نماذجه في منصة Grengin.",
+      "placeholder": "أدخل مفتاح API الخاص بـ {name}",
+      "help": "يمكنك العثور على مفتاح API أو إنشاؤه من لوحة تحكم {name}.",
+      "submit": "التوصيل والحفظ",
+      "connecting": "جارٍ التوصيل...",
+      "connected": "تم توصيل {name} بنجاح"
+    },
+    "noFilterResults": "لا توجد محركات في هذا العرض."
   },
   "adminOverview": {
     "title": "نظرة عامة",

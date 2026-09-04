@@ -25,6 +25,9 @@ function createAIEnginesStore() {
 
   // Modal state
   let showConfigModal = $state(false);
+  // The design splits configuring an engine from connecting one: an engine with
+  // no key gets the "Connect <engine>" dialog, which only asks for the key.
+  let showConnectModal = $state(false);
   let selectedEngine = $state<AIEngine | null>(null);
 
   // Models state
@@ -176,6 +179,26 @@ function createAIEnginesStore() {
     } finally {
       loadingModels = false;
     }
+  }
+
+  function openConnectModal(engine: AIEngine) {
+    selectedEngine = engine;
+    apiKeyInput = '';
+    apiKeyStatus = engine.api_key_status || 'not_configured';
+    apiKeyMessage = null;
+    apiKeyMode = 'add';
+    showApiKey = false;
+    apiKeyDeleteConfirm = false;
+    showConnectModal = true;
+  }
+
+  function closeConnectModal() {
+    showConnectModal = false;
+    selectedEngine = null;
+    apiKeyInput = '';
+    apiKeyMessage = null;
+    apiKeyLoading = false;
+    apiKeyMode = 'cta';
   }
 
   function closeConfigModal() {
@@ -387,6 +410,7 @@ function createAIEnginesStore() {
     error = null;
     defaultEngineKey = undefined;
     showConfigModal = false;
+    showConnectModal = false;
     selectedEngine = null;
     availableModels = null;
     loadingModels = false;
@@ -414,6 +438,9 @@ function createAIEnginesStore() {
     },
     get showConfigModal() {
       return showConfigModal;
+    },
+    get showConnectModal() {
+      return showConnectModal;
     },
     get selectedEngine() {
       return selectedEngine;
@@ -484,6 +511,8 @@ function createAIEnginesStore() {
     toggleEngineStatus,
     openConfigModal,
     closeConfigModal,
+    openConnectModal,
+    closeConnectModal,
     refreshSelectedEngine,
     loadModelsForSelected,
     updateEngine,

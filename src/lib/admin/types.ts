@@ -66,7 +66,15 @@ export interface SSOProviderDetails {
 export interface AIEngine {
   engine_key: string;
   display_name: string;
+  /**
+   * Brand mark from the engine registry. Arrives either as raw inline SVG
+   * markup or as a URL/data URI — render it through `providerIconSvg` /
+   * `providerIconUrl` (src/lib/utils/providerIcon.ts), never straight into
+   * an `<img src>`.
+   */
   icon?: string;
+  /** Variant for dark surfaces, when the registry ships one. */
+  icon_dark?: string;
   is_enabled: boolean;
   api_key_configured: boolean;
   api_key_status?: 'valid' | 'in_valid' | 'not_validated' | 'not_configured';

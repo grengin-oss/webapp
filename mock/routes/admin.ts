@@ -663,6 +663,32 @@ router.put('/admin/organization', requireAuth, (req, res) => {
   res.json({ ...organizationExample, ...req.body, updated_at: new Date().toISOString() })
 })
 
+// Branding carries the org-wide defaults the AI Engines page reads and writes:
+// `settings.default_engine` / `settings.default_model` are what the "set as
+// system default engine" checkbox toggles. Kept in memory so the round-trip works.
+let branding = {
+  ...organizationExample,
+  settings: {
+    ...organizationExample.settings,
+    default_engine: 'openai',
+    default_model: 'gpt-4o',
+  },
+}
+
+router.get('/admin/branding', requireAuth, (_req, res) => {
+  res.json(branding)
+})
+
+router.put('/admin/branding', requireAuth, (req, res) => {
+  branding = {
+    ...branding,
+    ...req.body,
+    settings: { ...branding.settings, ...(req.body?.settings ?? {}) },
+    updated_at: new Date().toISOString(),
+  }
+  res.json(branding)
+})
+
 // AI Engines
 router.get('/admin/ai-engines', requireAuth, (req, res) => {
   res.json(Array.from(aiEngines.values()))
@@ -779,6 +805,11 @@ router.get('/admin/ai-engines/:engineKey/models', requireAuth, (req, res) => {
     groq: [
       { model_id: 'llama-3.3-70b-versatile', display_name: 'Llama 3.3 70B', is_whitelisted: false, capabilities: { vision: false, function_calling: true, streaming: true } },
       { model_id: 'mixtral-8x7b-32768', display_name: 'Mixtral 8x7B', is_whitelisted: false, capabilities: { vision: false, function_calling: true, streaming: true } },
+    ],
+    cohere: [
+      { model_id: 'command-a-03-2025', display_name: 'Command A', is_whitelisted: false, model_type: 'text_generator', capabilities: { vision: false, function_calling: true, streaming: true } },
+      { model_id: 'command-r-plus', display_name: 'Command R+', is_whitelisted: false, model_type: 'text_generator', capabilities: { vision: false, function_calling: true, streaming: true } },
+      { model_id: 'embed-v4.0', display_name: 'Embed v4.0', is_whitelisted: false, model_type: 'text_embedder', capabilities: { vision: false, function_calling: false, streaming: false } },
     ],
   }
 

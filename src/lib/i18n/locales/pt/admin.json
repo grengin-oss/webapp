@@ -1248,7 +1248,10 @@
       "mustRemainWhitelisted": "O modelo predefinido tem de permanecer na lista permitida",
       "cannotRemoveDefault": "Não é possível remover o modelo predefinido da lista. Altere primeiro o modelo predefinido.",
       "imageModel": "Modelo de geração de imagens",
-      "textModel": "Modelo de texto"
+      "textModel": "Modelo de texto",
+      "searchPlaceholder": "Pesquisar modelos…",
+      "countEnabled": "{count} de {total} ativados",
+      "noSearchResults": "Nenhum modelo corresponde a “{query}”."
     },
     "systemDefault": {
       "title": "Definir como motor predefinido do sistema",
@@ -1263,7 +1266,8 @@
     },
     "actions": {
       "save": "Guardar",
-      "saving": "A guardar..."
+      "saving": "A guardar...",
+      "saveChanges": "Salvar alterações"
     },
     "toasts": {
       "enabled": "{name} ativado",
@@ -1288,7 +1292,47 @@
       "defaultModel": "Modelo predefinido: {model}",
       "modelsWhitelisted": "{count} modelos na lista permitida",
       "noModelsAllowed": "Nenhum modelo permitido"
-    }
+    },
+    "searchPlaceholder": "Pesquisar motores (ex.: OpenAI, Mistral)",
+    "connectEngine": "Conectar motor",
+    "noResults": "Nenhum motor corresponde a “{query}”.",
+    "filters": {
+      "label": "Filtrar motores",
+      "all": "Todos",
+      "active": "Ativos",
+      "available": "Disponíveis"
+    },
+    "stats": {
+      "connectedValue": "{connected} de {total}",
+      "connectedLabel": "Motores conectados",
+      "whitelistedLabel": "Modelos permitidos",
+      "mostUsedLabel": "Mais usado esta semana — {count} req.",
+      "noUsageLabel": "Nenhum uso registrado esta semana"
+    },
+    "card": {
+      "defaultModel": "Modelo padrão",
+      "whitelist": "Lista de permissões",
+      "whitelistCount": "{count} modelos",
+      "notSet": "Não definido",
+      "notConnected": "Não conectado",
+      "connectFirst": "Adicione uma chave de API antes de ativar este motor.",
+      "noKeyDescription": "Adicione uma chave de API para ativar os modelos {name} no seu espaço de trabalho."
+    },
+    "configure": {
+      "title": "Configurar {name}",
+      "subtitle": "Chave de API, lista de modelos permitidos e padrões"
+    },
+    "connect": {
+      "title": "Conectar {name}",
+      "emptyTitle": "Conectar-se ao {name}",
+      "emptyDescription": "Forneça sua chave de API do {name} para desbloquear seus modelos na plataforma Grengin.",
+      "placeholder": "Insira sua chave de API do {name}",
+      "help": "Você pode encontrar ou gerar sua chave de API no painel do {name}.",
+      "submit": "Conectar e salvar",
+      "connecting": "Conectando...",
+      "connected": "{name} conectado com sucesso"
+    },
+    "noFilterResults": "Nenhum motor nesta visualização."
   },
   "adminOverview": {
     "title": "Visão Geral",
