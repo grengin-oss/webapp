@@ -421,30 +421,59 @@ SPDX-License-Identifier: Apache-2.0
   </Link>
   {#if hasAdminPermissions}
     <span class="us-rule" aria-hidden="true"></span>
-    <Link
-      to="/admin"
-      class="us-item"
-      onclick={handleUserMenuNavigate}
-      role="menuitem"
-      aria-label={$_("sidebar.admin")}
-      title={$_("sidebar.admin")}
-    >
-      <span class="us-item__icon" aria-hidden="true">
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-        </svg>
-      </span>
-      <span class="us-item__label">{$_("sidebar.admin")}</span>
-    </Link>
+    {#if isAdminView}
+      <Link
+        to="/"
+        class="us-item"
+        onclick={handleUserMenuNavigate}
+        role="menuitem"
+        aria-label={$_("sidebar.chat")}
+        title={$_("sidebar.chat")}
+      >
+        <span class="us-item__icon" aria-hidden="true">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path
+              d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"
+            />
+          </svg>
+        </span>
+        <span class="us-item__label">{$_("sidebar.chat")}</span>
+      </Link>
+    {:else}
+      <Link
+        to="/admin"
+        class="us-item"
+        onclick={handleUserMenuNavigate}
+        role="menuitem"
+        aria-label={$_("sidebar.admin")}
+        title={$_("sidebar.admin")}
+      >
+        <span class="us-item__icon" aria-hidden="true">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+          </svg>
+        </span>
+        <span class="us-item__label">{$_("sidebar.admin")}</span>
+      </Link>
+    {/if}
   {/if}
   <span class="us-rule" aria-hidden="true"></span>
   <button
